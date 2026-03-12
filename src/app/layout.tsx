@@ -15,8 +15,14 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OutboundFlow",
-  description: "Internal cold outreach workspace for small teams.",
+  title: "OutboundFlow | Gmail-Native Outbound That Ships Pipeline",
+  description:
+    "Launch personalized outbound campaigns, sync replies back to a shared inbox, and monitor revenue signals from one workspace.",
+  icons: {
+    icon: "/brand/favicon.png",
+    apple: "/brand/favicon.png",
+    shortcut: "/brand/favicon.png",
+  },
 };
 
 export default function RootLayout({
