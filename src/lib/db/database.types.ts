@@ -236,11 +236,17 @@ export type Database = {
           created_at: string;
           full_name: string | null;
           id: string;
+          onboarding_completed_at: string | null;
           primary_workspace_id: string | null;
           title: string | null;
           updated_at: string;
         };
-        Insert: Omit<Database["public"]["Tables"]["profiles"]["Row"], "created_at" | "updated_at">;
+        Insert: Omit<
+          Database["public"]["Tables"]["profiles"]["Row"],
+          "created_at" | "updated_at" | "onboarding_completed_at"
+        > & {
+          onboarding_completed_at?: string | null;
+        };
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
       };
       templates: {

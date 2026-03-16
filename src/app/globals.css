@@ -99,6 +99,85 @@ select {
   box-shadow: 0 16px 32px rgba(40, 54, 24, 0.08);
 }
 
+.auth-page-shell {
+  background:
+    radial-gradient(circle at top center, rgba(191, 236, 255, 0.85), transparent 30%),
+    radial-gradient(circle at bottom center, rgba(255, 255, 255, 0.95), transparent 32%),
+    linear-gradient(180deg, #cfeeff 0%, #edf7fd 54%, #f7fbfe 100%);
+}
+
+.auth-page-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at bottom center, rgba(255, 255, 255, 0.9), transparent 26%);
+  pointer-events: none;
+}
+
+.auth-page-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 80% at 50% 108%, transparent 58%, rgba(255, 255, 255, 0.7) 58.5%, transparent 59%),
+    radial-gradient(140% 92% at 50% 114%, transparent 62%, rgba(255, 255, 255, 0.56) 62.5%, transparent 63%),
+    radial-gradient(160% 104% at 50% 122%, transparent 66%, rgba(255, 255, 255, 0.44) 66.5%, transparent 67%);
+  pointer-events: none;
+}
+
+.auth-page-orb {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(90px);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.auth-page-orb-left {
+  left: -7rem;
+  top: 3rem;
+  height: 16rem;
+  width: 16rem;
+  background: rgba(167, 225, 255, 0.42);
+}
+
+.auth-page-orb-right {
+  right: -5rem;
+  top: 10rem;
+  height: 17rem;
+  width: 17rem;
+  background: rgba(173, 227, 243, 0.34);
+}
+
+.auth-page-orb-bottom {
+  bottom: -7rem;
+  left: 36%;
+  height: 15rem;
+  width: 15rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.auth-card {
+  border-radius: 2.2rem;
+  border: 1px solid rgba(196, 231, 245, 0.78);
+  background:
+    linear-gradient(180deg, rgba(242, 252, 255, 0.92), rgba(255, 255, 255, 0.97)),
+    rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 26px 70px rgba(76, 123, 152, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(14px);
+}
+
+.auth-input {
+  background: rgba(243, 246, 248, 0.95);
+}
+
+.auth-input:focus {
+  background: white;
+}
+
 .marketing-shell {
   background:
     linear-gradient(180deg, #16012f 0%, #22084f 24%, #fbf3f8 24%, #fbf3f8 100%);
@@ -343,6 +422,12 @@ select {
     scroll-behavior: auto;
   }
 
+  .auth-card,
+  .auth-input,
+  .auth-page-orb {
+    transition: none;
+  }
+
   .marketing-card,
   .marketing-light-card,
   .marketing-light-cta-panel,
@@ -388,4 +473,16 @@ select {
   height: 15rem;
   width: 15rem;
   background: rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 1023px) {
+  .auth-page-shell::after {
+    opacity: 0.75;
+  }
+}
+
+@media (min-width: 1024px) {
+  .auth-stage-simple {
+    max-width: 34rem;
+  }
 }
