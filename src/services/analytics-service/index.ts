@@ -100,7 +100,7 @@ export async function listThreads(workspaceId: string) {
   const { data, error } = await supabase
     .from("message_threads")
     .select(
-      "id, gmail_thread_id, subject, snippet, latest_message_at, thread_messages(id, direction, from_email, to_emails, subject, body_text, sent_at)",
+      "id, gmail_thread_id, subject, snippet, latest_message_at, thread_messages(id, direction, from_email, to_emails, subject, body_text, body_html, sent_at)",
     )
     .eq("workspace_id", workspaceId)
     .order("latest_message_at", { ascending: false })
@@ -115,15 +115,16 @@ export async function listThreads(workspaceId: string) {
     subject: string | null;
     snippet: string | null;
     latest_message_at: string | null;
-    thread_messages: Array<{
-      id: string;
-      direction: string;
-      from_email: string | null;
-      to_emails: string[] | null;
-      subject: string | null;
-      body_text: string | null;
-      sent_at: string;
-    }> | null;
+      thread_messages: Array<{
+        id: string;
+        direction: string;
+        from_email: string | null;
+        to_emails: string[] | null;
+        subject: string | null;
+        body_text: string | null;
+        body_html: string | null;
+        sent_at: string;
+      }> | null;
   }>).map((thread) => ({
     id: thread.id,
     subject: thread.subject,
@@ -137,6 +138,7 @@ export async function listThreads(workspaceId: string) {
         to_emails: string[] | null;
         subject: string | null;
         body_text: string | null;
+        body_html: string | null;
         sent_at: string;
       }> | null) ?? []) || [],
   }));

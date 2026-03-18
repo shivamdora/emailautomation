@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   await logActivity({
     workspaceId: workspace.workspaceId,
     actorUserId: workspace.userId,
-    action: "campaign.launched",
+    action: "campaign.created",
     targetType: "campaign",
     targetId: result.id,
   });

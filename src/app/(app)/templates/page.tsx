@@ -11,6 +11,7 @@ export default async function TemplatesPage() {
     name: string;
     subject_template: string;
     body_template: string;
+    body_html_template?: string | null;
   }>;
 
   return (
@@ -18,7 +19,7 @@ export default async function TemplatesPage() {
       <PageHeader
         eyebrow="Templates"
         title="Reusable copy blocks"
-        description="Subject/body templates with merge variables like {{first_name}}, {{company}}, and custom fields."
+        description="Save reusable text or HTML email templates with merge variables like {{first_name}}, {{company}}, and custom fields."
       />
       <TemplateForm />
       <SimpleDataTable
@@ -26,8 +27,20 @@ export default async function TemplatesPage() {
         rows={templates}
         columns={[
           { key: "name", header: "Name" },
+          {
+            key: "mode",
+            header: "Mode",
+            render: (row) => ((row.body_html_template as string | null | undefined) ? "HTML" : "Text"),
+          },
           { key: "subject_template", header: "Subject" },
-          { key: "body_template", header: "Body" },
+          {
+            key: "body_preview",
+            header: "Preview",
+            render: (row) =>
+              ((row.body_html_template as string | null | undefined)
+                ? "Designed HTML template with text fallback"
+                : String(row.body_template ?? "").slice(0, 120)),
+          },
         ]}
       />
     </div>

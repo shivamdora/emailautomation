@@ -1,5 +1,7 @@
 import { google } from "googleapis";
+import { randomUUID } from "crypto";
 import { env } from "@/lib/supabase/env";
+import { normalizeEmailHtmlDocument } from "@/lib/utils/html";
 import {
   type MailboxProvider,
   type ProviderTokenState,
@@ -30,14 +32,29 @@ function decodeBody(data?: string | null) {
 }
 
 function buildMimeMessage(input: SendMessageInput) {
+  const boundary = `boundary_${randomUUID()}`;
+  const encodedText = Buffer.from(input.bodyText, "utf8").toString("base64");
+  const encodedHtml = Buffer.from(normalizeEmailHtmlDocument(input.bodyHtml), "utf8").toString("base64");
   const lines = [
     `From: ${input.fromEmail}`,
     `To: ${input.toEmail}`,
-    "Content-Type: text/html; charset=utf-8",
     "MIME-Version: 1.0",
     `Subject: ${input.subject}`,
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
     "",
-    input.bodyHtml,
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    encodedText,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/html; charset=utf-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    encodedHtml,
+    "",
+    `--${boundary}--`,
   ];
 
   return Buffer.from(lines.join("\r\n"))

@@ -56,6 +56,7 @@ export type Database = {
       };
       campaign_steps: {
         Row: {
+          body_html_template: string | null;
           body_template: string;
           campaign_id: string;
           created_at: string;
@@ -108,6 +109,26 @@ export type Database = {
         };
         Insert: Omit<Database["public"]["Tables"]["contacts"]["Row"], "id" | "created_at" | "updated_at">;
         Update: Partial<Database["public"]["Tables"]["contacts"]["Insert"]>;
+      };
+      contact_tag_members: {
+        Row: {
+          contact_id: string;
+          created_at: string;
+          id: string;
+          tag_id: string;
+        };
+        Insert: Omit<Database["public"]["Tables"]["contact_tag_members"]["Row"], "id" | "created_at">;
+        Update: Partial<Database["public"]["Tables"]["contact_tag_members"]["Insert"]>;
+      };
+      contact_tags: {
+        Row: {
+          created_at: string;
+          id: string;
+          name: string;
+          workspace_id: string;
+        };
+        Insert: Omit<Database["public"]["Tables"]["contact_tags"]["Row"], "id" | "created_at">;
+        Update: Partial<Database["public"]["Tables"]["contact_tags"]["Insert"]>;
       };
       feature_flags: {
         Row: {
@@ -251,6 +272,7 @@ export type Database = {
       };
       templates: {
         Row: {
+          body_html_template: string | null;
           body_template: string;
           created_at: string;
           id: string;

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DeleteCampaignButton } from "@/components/campaigns/delete-campaign-button";
 import { SendNowButton } from "@/components/campaigns/send-now-button";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,8 +57,12 @@ export default async function CampaignsPage() {
               <div className="flex items-center gap-2">
                 <SendNowButton campaignId={row.id} size="sm" disabled={row.status !== "active"} />
                 <Button asChild size="sm" variant="outline">
+                  <Link href={`/campaigns/${row.id}/edit`}>Edit</Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
                   <Link href={`/campaigns/${row.id}`}>Open</Link>
                 </Button>
+                <DeleteCampaignButton campaignId={row.id} size="sm" />
               </div>
             ),
           },

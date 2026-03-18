@@ -3,9 +3,46 @@ import { addDays } from "date-fns";
 import { createHash, randomUUID } from "crypto";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { env, requireSupabaseConfiguration } from "@/lib/supabase/env";
+import { escapeHtml, normalizeEmailHtmlDocument, stripHtmlToText } from "@/lib/utils/html";
 import { renderTemplate } from "@/lib/utils/template";
 import { isWithinSendWindow } from "@/lib/utils/time";
 import { getMailboxAccessTokenForAccount, sendWithMailboxProvider } from "@/services/gmail-service";
+
+type CampaignStepInput = {
+  subject: string;
+  mode: "text" | "html";
+  body?: string | null;
+  bodyHtml?: string | null;
+};
+
+type StoredCampaignStep = {
+  step_number: number;
+  subject_template: string;
+  body_template: string;
+  body_html_template?: string | null;
+  wait_days?: number | null;
+  step_type?: "initial" | "follow_up";
+};
+
+type CampaignContactContext = {
+  email?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  company?: string | null;
+  website?: string | null;
+  job_title?: string | null;
+  custom_fields_jsonb?: Record<string, unknown> | null;
+  unsubscribed_at?: string | null;
+};
+
+function isCampaignSchemaCacheError(error: { message?: string | null; details?: string | null; hint?: string | null } | null | undefined) {
+  const parts = [error?.message, error?.details, error?.hint].filter(Boolean).join(" ").toLowerCase();
+  return (
+    parts.includes("schema cache") ||
+    parts.includes("could not find the column") ||
+    parts.includes("body_html_template")
+  );
+}
 
 function buildUnsubscribeLink(token: string) {
   return `${env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/unsubscribes/${token}`;
@@ -15,27 +52,218 @@ function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
+function normalizeStepInput(step: CampaignStepInput) {
+  const bodyHtml = step.mode === "html" ? step.bodyHtml?.trim() || null : null;
+  const fallbackText =
+    step.mode === "html"
+      ? step.body?.trim() || (bodyHtml ? stripHtmlToText(bodyHtml) : "")
+      : step.body?.trim() || "";
+
+  return {
+    subject_template: step.subject.trim(),
+    body_template: fallbackText,
+    body_html_template: bodyHtml,
+  };
+}
+
+function appendUnsubscribeHtml(htmlBody: string, unsubscribeLink: string) {
+  const normalized = normalizeEmailHtmlDocument(htmlBody);
+  const unsubscribeBlock = `<div style="margin-top:24px;font-size:13px;color:#64748b;"><a href="${unsubscribeLink}">Unsubscribe</a></div>`;
+
+  if (/<\/body>/i.test(normalized)) {
+    return normalized.replace(/<\/body>/i, `${unsubscribeBlock}</body>`);
+  }
+
+  return `${normalized}${unsubscribeBlock}`;
+}
+
+function appendUnsubscribeText(textBody: string, unsubscribeLink: string) {
+  return `${textBody}\n\nUnsubscribe: ${unsubscribeLink}`.trim();
+}
+
+function textBodyToHtml(textBody: string, unsubscribeLink: string) {
+  return `${escapeHtml(textBody).replace(/\n/g, "<br />")}<br /><br /><a href="${unsubscribeLink}">Unsubscribe</a>`;
+}
+
+function renderCampaignStepContent(step: StoredCampaignStep, contact: CampaignContactContext, unsubscribeLink: string) {
+  const renderedSubject = renderTemplate(step.subject_template, contact);
+  const renderedTextBody = renderTemplate(step.body_template, contact);
+  const renderedHtmlBody = step.body_html_template
+    ? renderTemplate(step.body_html_template, contact)
+    : null;
+  const textBody = renderedTextBody || (renderedHtmlBody ? stripHtmlToText(renderedHtmlBody) : "");
+
+  return {
+    subject: renderedSubject,
+    bodyText: appendUnsubscribeText(textBody, unsubscribeLink),
+    bodyHtml: renderedHtmlBody
+      ? appendUnsubscribeHtml(renderedHtmlBody, unsubscribeLink)
+      : textBodyToHtml(textBody, unsubscribeLink),
+    snippet: textBody.slice(0, 120),
+  };
+}
+
+async function upsertCampaignSteps(input: {
+  campaignId: string;
+  primaryStep: CampaignStepInput;
+  followupStep: CampaignStepInput;
+}) {
+  const supabase = createAdminSupabaseClient();
+  const normalizedPrimary = normalizeStepInput(input.primaryStep);
+  const normalizedFollowup = normalizeStepInput(input.followupStep);
+  const { error } = await supabase.from("campaign_steps").upsert(
+    [
+      {
+        campaign_id: input.campaignId,
+        step_number: 1,
+        step_type: "initial",
+        subject_template: normalizedPrimary.subject_template,
+        body_template: normalizedPrimary.body_template,
+        body_html_template: normalizedPrimary.body_html_template,
+        wait_days: 0,
+      },
+      {
+        campaign_id: input.campaignId,
+        step_number: 2,
+        step_type: "follow_up",
+        subject_template: normalizedFollowup.subject_template,
+        body_template: normalizedFollowup.body_template,
+        body_html_template: normalizedFollowup.body_html_template,
+        wait_days: env.FOLLOW_UP_DELAY_DAYS,
+      },
+    ],
+    { onConflict: "campaign_id,step_number" },
+  );
+
+  if (error) {
+    if (isCampaignSchemaCacheError(error)) {
+      if (normalizedPrimary.body_html_template || normalizedFollowup.body_html_template) {
+        throw new Error(
+          "HTML campaigns are not enabled in this database yet. Apply the latest Supabase migration to add campaign_steps.body_html_template before sending designed HTML emails.",
+        );
+      }
+
+      const fallback = await supabase.from("campaign_steps").upsert(
+        [
+          {
+            campaign_id: input.campaignId,
+            step_number: 1,
+            step_type: "initial",
+            subject_template: normalizedPrimary.subject_template,
+            body_template: normalizedPrimary.body_template,
+            wait_days: 0,
+          },
+          {
+            campaign_id: input.campaignId,
+            step_number: 2,
+            step_type: "follow_up",
+            subject_template: normalizedFollowup.subject_template,
+            body_template: normalizedFollowup.body_template,
+            wait_days: env.FOLLOW_UP_DELAY_DAYS,
+          },
+        ],
+        { onConflict: "campaign_id,step_number" },
+      );
+
+      if (fallback.error) {
+        throw fallback.error;
+      }
+
+      return;
+    }
+    throw error;
+  }
+}
+
+async function selectCampaignWithSteps(campaignId: string) {
+  const supabase = createAdminSupabaseClient();
+  let result = await supabase
+    .from("campaigns")
+    .select(
+      "id, name, status, daily_send_limit, timezone, send_window_start, send_window_end, gmail_account_id, campaign_steps(id, step_number, step_type, subject_template, body_template, body_html_template, wait_days), campaign_contacts(id, status, current_step, next_due_at, contact_id, contact:contacts(email, first_name, company))",
+    )
+    .eq("id", campaignId)
+    .single();
+
+  if (result.error && isCampaignSchemaCacheError(result.error)) {
+    result = await supabase
+      .from("campaigns")
+      .select(
+        "id, name, status, daily_send_limit, timezone, send_window_start, send_window_end, gmail_account_id, campaign_steps(id, step_number, step_type, subject_template, body_template, wait_days), campaign_contacts(id, status, current_step, next_due_at, contact_id, contact:contacts(email, first_name, company))",
+      )
+      .eq("id", campaignId)
+      .single();
+  }
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  return result.data;
+}
+
+async function selectCampaignForEditing(campaignId: string, workspaceId: string) {
+  const supabase = createAdminSupabaseClient();
+  let result = await supabase
+    .from("campaigns")
+    .select(
+      "id, workspace_id, name, status, gmail_account_id, daily_send_limit, timezone, send_window_start, send_window_end, campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days), campaign_contacts(contact_id, status, current_step)",
+    )
+    .eq("id", campaignId)
+    .eq("workspace_id", workspaceId)
+    .single();
+
+  if (result.error && isCampaignSchemaCacheError(result.error)) {
+    result = await supabase
+      .from("campaigns")
+      .select(
+        "id, workspace_id, name, status, gmail_account_id, daily_send_limit, timezone, send_window_start, send_window_end, campaign_steps(step_number, step_type, subject_template, body_template, wait_days), campaign_contacts(contact_id, status, current_step)",
+      )
+      .eq("id", campaignId)
+      .eq("workspace_id", workspaceId)
+      .single();
+  }
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  return result.data;
+}
+
 export async function listTemplates(workspaceId: string) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
-  const { data, error } = await supabase
+  let result = await supabase
     .from("templates")
-    .select("id, name, subject_template, body_template, created_at")
+    .select("id, name, subject_template, body_template, body_html_template, created_at")
     .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
 
-  if (error) {
-    throw error;
+  if (result.error && isCampaignSchemaCacheError(result.error)) {
+    result = await supabase
+      .from("templates")
+      .select("id, name, subject_template, body_template, created_at")
+      .eq("workspace_id", workspaceId)
+      .order("created_at", { ascending: false });
   }
 
-  return data as Array<{
+  if (result.error) {
+    throw result.error;
+  }
+
+  return ((result.data ?? []) as Array<{
     id: string;
     name: string;
     subject_template: string;
     body_template: string;
+    body_html_template?: string | null;
     created_at: string;
-  }>;
+  }>).map((template) => ({
+    ...template,
+    body_html_template: template.body_html_template ?? null,
+  }));
 }
 
 export async function saveTemplate(input: {
@@ -43,24 +271,59 @@ export async function saveTemplate(input: {
   userId: string;
   name: string;
   subjectTemplate: string;
-  bodyTemplate: string;
+  mode: "text" | "html";
+  bodyTemplate?: string | null;
+  bodyHtmlTemplate?: string | null;
 }) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
+  const normalized = normalizeStepInput({
+    subject: input.subjectTemplate,
+    mode: input.mode,
+    body: input.bodyTemplate,
+    bodyHtml: input.bodyHtmlTemplate,
+  });
+  const templatePayload = {
+    workspace_id: input.workspaceId,
+    owner_user_id: input.userId,
+    name: input.name,
+    subject_template: normalized.subject_template,
+    body_template: normalized.body_template,
+    body_html_template: normalized.body_html_template,
+  };
   const { data, error } = await supabase
     .from("templates")
-    .insert({
-      workspace_id: input.workspaceId,
-      owner_user_id: input.userId,
-      name: input.name,
-      subject_template: input.subjectTemplate,
-      body_template: input.bodyTemplate,
-    })
+    .insert(templatePayload)
     .select("id")
     .single();
 
   if (error) {
+    if (isCampaignSchemaCacheError(error)) {
+      if (normalized.body_html_template) {
+        throw new Error(
+          "HTML templates are not enabled in this database yet. Apply the latest Supabase migration to add templates.body_html_template before saving designed templates.",
+        );
+      }
+
+      const fallback = await supabase
+        .from("templates")
+        .insert({
+          workspace_id: input.workspaceId,
+          owner_user_id: input.userId,
+          name: input.name,
+          subject_template: normalized.subject_template,
+          body_template: normalized.body_template,
+        })
+        .select("id")
+        .single();
+
+      if (fallback.error) {
+        throw fallback.error;
+      }
+
+      return fallback.data as { id: string };
+    }
     throw error;
   }
 
@@ -93,19 +356,7 @@ export async function listCampaigns(workspaceId: string) {
 
 export async function getCampaignById(campaignId: string) {
   requireSupabaseConfiguration();
-
-  const supabase = createAdminSupabaseClient();
-  const { data, error } = await supabase
-    .from("campaigns")
-    .select(
-      "id, name, status, daily_send_limit, timezone, send_window_start, send_window_end, campaign_contacts(id, status, current_step, next_due_at, contact:contacts(email, first_name, company))",
-    )
-    .eq("id", campaignId)
-    .single();
-
-  if (error) {
-    throw error;
-  }
+  const data = await selectCampaignWithSteps(campaignId);
 
   return data as {
     id: string;
@@ -113,15 +364,41 @@ export async function getCampaignById(campaignId: string) {
     status: string;
     daily_send_limit: number;
     timezone: string;
+    gmail_account_id: string;
     send_window_start?: string | null;
     send_window_end?: string | null;
+    campaign_steps?: StoredCampaignStep[] | null;
     campaign_contacts?: Array<{
       id: string;
+      contact_id?: string;
       status: string;
       current_step: number;
       next_due_at: string | null;
       contact?: { email?: string | null; first_name?: string | null; company?: string | null } | null;
-    }>;
+    }> | null;
+  };
+}
+
+export async function getCampaignForEditing(campaignId: string, workspaceId: string) {
+  requireSupabaseConfiguration();
+  const data = await selectCampaignForEditing(campaignId, workspaceId);
+
+  return data as {
+    id: string;
+    workspace_id: string;
+    name: string;
+    status: string;
+    gmail_account_id: string;
+    daily_send_limit: number;
+    timezone: string;
+    send_window_start: string;
+    send_window_end: string;
+    campaign_steps?: StoredCampaignStep[] | null;
+    campaign_contacts?: Array<{
+      contact_id: string;
+      status: string;
+      current_step: number;
+    }> | null;
   };
 }
 
@@ -134,14 +411,7 @@ type DueCampaignContact = {
   failed_attempts: number;
   next_due_at: string | null;
   last_thread_id?: string | null;
-  contact?: {
-    email?: string | null;
-    first_name?: string | null;
-    company?: string | null;
-    website?: string | null;
-    custom_fields_jsonb?: Record<string, unknown> | null;
-    unsubscribed_at?: string | null;
-  } | null;
+  contact?: CampaignContactContext | null;
   campaign?: {
     id: string;
     workspace_id: string;
@@ -152,12 +422,7 @@ type DueCampaignContact = {
     send_window_start: string;
     send_window_end: string;
     timezone: string;
-    campaign_steps?: Array<{
-      step_number: number;
-      subject_template: string;
-      body_template: string;
-      wait_days?: number | null;
-    }> | null;
+    campaign_steps?: StoredCampaignStep[] | null;
   } | null;
   outbound_messages?: Array<{ step_number: number }> | null;
 };
@@ -195,15 +460,14 @@ async function processCampaignContact(item: DueCampaignContact, options?: { igno
   try {
     const mailbox = await getMailboxAccessTokenForAccount(campaign.gmail_account_id);
     const unsubscribeToken = randomUUID();
-    const renderedSubject = renderTemplate(step.subject_template, contact);
-    const renderedBody = renderTemplate(step.body_template, contact);
+    const rendered = renderCampaignStepContent(step, contact, buildUnsubscribeLink(unsubscribeToken));
     const sendResult = await sendWithMailboxProvider({
       accessToken: mailbox.accessToken,
       fromEmail: mailbox.emailAddress,
       toEmail: contact.email,
-      subject: renderedSubject,
-      bodyHtml: `${renderedBody.replace(/\n/g, "<br />")}<br /><br /><a href="${buildUnsubscribeLink(unsubscribeToken)}">Unsubscribe</a>`,
-      bodyText: renderedBody,
+      subject: rendered.subject,
+      bodyHtml: rendered.bodyHtml,
+      bodyText: rendered.bodyText,
       replyThreadId: item.current_step === 2 ? item.last_thread_id : null,
     });
 
@@ -222,8 +486,8 @@ async function processCampaignContact(item: DueCampaignContact, options?: { igno
       workspace_id: campaign.workspace_id,
       campaign_contact_id: item.id,
       gmail_thread_id: sendResult.threadId || sendResult.messageId || randomUUID(),
-      subject: renderedSubject,
-      snippet: renderedBody.slice(0, 120),
+      subject: rendered.subject,
+      snippet: rendered.snippet,
       latest_message_at: sentAt,
     });
 
@@ -271,10 +535,8 @@ export async function createCampaign(input: {
   sendWindowStart: string;
   sendWindowEnd: string;
   dailySendLimit: number;
-  primarySubject: string;
-  primaryBody: string;
-  followupSubject: string;
-  followupBody: string;
+  primaryStep: CampaignStepInput;
+  followupStep: CampaignStepInput;
 }) {
   requireSupabaseConfiguration();
 
@@ -299,26 +561,14 @@ export async function createCampaign(input: {
   if (error) {
     throw error;
   }
+
   const campaign = rawCampaign as { id: string };
 
-  await supabase.from("campaign_steps").insert([
-    {
-      campaign_id: campaign.id,
-      step_number: 1,
-      step_type: "initial",
-      subject_template: input.primarySubject,
-      body_template: input.primaryBody,
-      wait_days: 0,
-    },
-    {
-      campaign_id: campaign.id,
-      step_number: 2,
-      step_type: "follow_up",
-      subject_template: input.followupSubject,
-      body_template: input.followupBody,
-      wait_days: env.FOLLOW_UP_DELAY_DAYS,
-    },
-  ]);
+  await upsertCampaignSteps({
+    campaignId: campaign.id,
+    primaryStep: input.primaryStep,
+    followupStep: input.followupStep,
+  });
 
   await supabase.from("campaign_contacts").insert(
     input.targetContactIds.map((contactId) => ({
@@ -332,6 +582,153 @@ export async function createCampaign(input: {
   );
 
   return { id: campaign.id, launched: true };
+}
+
+export async function updateCampaign(input: {
+  workspaceId: string;
+  campaignId: string;
+  campaignName: string;
+  gmailAccountId: string;
+  targetContactIds: string[];
+  timezone: string;
+  sendWindowStart: string;
+  sendWindowEnd: string;
+  dailySendLimit: number;
+  primaryStep: CampaignStepInput;
+  followupStep: CampaignStepInput;
+}) {
+  requireSupabaseConfiguration();
+
+  const supabase = createAdminSupabaseClient();
+  const { data: campaign, error: campaignError } = await supabase
+    .from("campaigns")
+    .select("id")
+    .eq("id", input.campaignId)
+    .eq("workspace_id", input.workspaceId)
+    .maybeSingle();
+
+  if (campaignError) {
+    throw campaignError;
+  }
+
+  if (!campaign) {
+    throw new Error("Campaign not found.");
+  }
+
+  const { error: updateError } = await supabase
+    .from("campaigns")
+    .update({
+      name: input.campaignName,
+      gmail_account_id: input.gmailAccountId,
+      daily_send_limit: input.dailySendLimit,
+      send_window_start: input.sendWindowStart,
+      send_window_end: input.sendWindowEnd,
+      timezone: input.timezone,
+    })
+    .eq("id", input.campaignId)
+    .eq("workspace_id", input.workspaceId);
+
+  if (updateError) {
+    throw updateError;
+  }
+
+  await upsertCampaignSteps({
+    campaignId: input.campaignId,
+    primaryStep: input.primaryStep,
+    followupStep: input.followupStep,
+  });
+
+  const { data: existingContacts, error: contactsError } = await supabase
+    .from("campaign_contacts")
+    .select("id, contact_id, status, current_step, outbound_messages(id)")
+    .eq("campaign_id", input.campaignId);
+
+  if (contactsError) {
+    throw contactsError;
+  }
+
+  const selectedIds = new Set(input.targetContactIds);
+  const currentContacts = (existingContacts ??
+    []) as Array<{
+    id: string;
+    contact_id: string;
+    status: string;
+    current_step: number;
+    outbound_messages?: Array<{ id: string }> | null;
+  }>;
+  const existingIds = new Set(currentContacts.map((contact) => contact.contact_id));
+
+  for (const contact of currentContacts) {
+    if (selectedIds.has(contact.contact_id)) {
+      if (contact.status === "skipped" && !(contact.outbound_messages?.length ?? 0)) {
+        await supabase
+          .from("campaign_contacts")
+          .update({
+            status: "queued",
+            current_step: 1,
+            next_due_at: new Date().toISOString(),
+            error_message: null,
+          })
+          .eq("id", contact.id);
+      }
+
+      continue;
+    }
+
+    if ((contact.outbound_messages?.length ?? 0) === 0) {
+      await supabase.from("campaign_contacts").delete().eq("id", contact.id);
+      continue;
+    }
+
+    if (!["replied", "followup_sent", "unsubscribed"].includes(contact.status)) {
+      await supabase
+        .from("campaign_contacts")
+        .update({
+          status: "skipped",
+          next_due_at: null,
+          error_message: "Removed during campaign edit",
+        })
+        .eq("id", contact.id);
+    }
+  }
+
+  const contactsToInsert = input.targetContactIds.filter((contactId) => !existingIds.has(contactId));
+
+  if (contactsToInsert.length) {
+    const { error: insertError } = await supabase.from("campaign_contacts").insert(
+      contactsToInsert.map((contactId) => ({
+        campaign_id: input.campaignId,
+        contact_id: contactId,
+        status: "queued",
+        current_step: 1,
+        next_due_at: new Date().toISOString(),
+        failed_attempts: 0,
+      })),
+    );
+
+    if (insertError) {
+      throw insertError;
+    }
+  }
+
+  return { id: input.campaignId, updated: true };
+}
+
+export async function deleteCampaign(campaignId: string, workspaceId: string) {
+  requireSupabaseConfiguration();
+
+  const supabase = createAdminSupabaseClient();
+  const { error } = await supabase
+    .from("campaigns")
+    .delete()
+    .eq("id", campaignId)
+    .eq("workspace_id", workspaceId);
+
+  if (error) {
+    throw error;
+  }
+
+  return { campaignId, deleted: true };
 }
 
 export async function pauseCampaign(campaignId: string, status: "paused" | "active") {
@@ -389,7 +786,7 @@ export async function sendCampaignNow(campaignId: string, workspaceId: string) {
       failed_attempts,
       next_due_at,
       last_thread_id,
-      contact:contacts(email, first_name, company, website, custom_fields_jsonb, unsubscribed_at),
+      contact:contacts(email, first_name, last_name, company, website, job_title, custom_fields_jsonb, unsubscribed_at),
       campaign:campaigns(
         id,
         workspace_id,
@@ -400,7 +797,7 @@ export async function sendCampaignNow(campaignId: string, workspaceId: string) {
         send_window_start,
         send_window_end,
         timezone,
-        campaign_steps(step_number, subject_template, body_template, wait_days)
+        campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days)
       ),
       outbound_messages(step_number)
     `,
@@ -411,6 +808,55 @@ export async function sendCampaignNow(campaignId: string, workspaceId: string) {
     .order("next_due_at", { ascending: true });
 
   if (error) {
+    if (isCampaignSchemaCacheError(error)) {
+      const fallback = await supabase
+        .from("campaign_contacts")
+        .select(
+          `
+          id,
+          campaign_id,
+          contact_id,
+          current_step,
+          status,
+          failed_attempts,
+          next_due_at,
+          last_thread_id,
+          contact:contacts(email, first_name, last_name, company, website, job_title, custom_fields_jsonb, unsubscribed_at),
+          campaign:campaigns(
+            id,
+            workspace_id,
+            name,
+            status,
+            gmail_account_id,
+            daily_send_limit,
+            send_window_start,
+            send_window_end,
+            timezone,
+            campaign_steps(step_number, step_type, subject_template, body_template, wait_days)
+          ),
+          outbound_messages(step_number)
+        `,
+        )
+        .eq("campaign_id", campaignId)
+        .in("status", ["queued", "followup_due"])
+        .lte("next_due_at", new Date().toISOString())
+        .order("next_due_at", { ascending: true });
+
+      if (fallback.error) {
+        throw fallback.error;
+      }
+
+      let processed = 0;
+
+      for (const item of (fallback.data ?? []) as DueCampaignContact[]) {
+        const result = await processCampaignContact(item, { ignoreSendWindow: true });
+        if (result.processed) {
+          processed += 1;
+        }
+      }
+
+      return { campaignId, processed };
+    }
     throw error;
   }
 

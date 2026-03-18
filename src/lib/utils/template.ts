@@ -1,7 +1,11 @@
+import { stripHtmlToText } from "@/lib/utils/html";
+
 type TemplateContext = {
   first_name?: string | null;
+  last_name?: string | null;
   company?: string | null;
   website?: string | null;
+  job_title?: string | null;
   custom?: Record<string, string | number | boolean | null | undefined> | null;
 };
 
@@ -20,10 +24,17 @@ export function renderTemplate(template: string, context: TemplateContext) {
 export function previewRenderedTemplate(input: {
   subjectTemplate: string;
   bodyTemplate: string;
+  bodyHtmlTemplate?: string | null;
   contact: TemplateContext;
 }) {
+  const renderedHtml = input.bodyHtmlTemplate
+    ? renderTemplate(input.bodyHtmlTemplate, input.contact)
+    : null;
+
   return {
     subject: renderTemplate(input.subjectTemplate, input.contact),
     body: renderTemplate(input.bodyTemplate, input.contact),
+    bodyHtml: renderedHtml,
+    textFallback: renderedHtml ? stripHtmlToText(renderedHtml) : renderTemplate(input.bodyTemplate, input.contact),
   };
 }

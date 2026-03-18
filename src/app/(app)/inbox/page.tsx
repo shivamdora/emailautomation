@@ -24,6 +24,7 @@ export default async function InboxPage() {
       to_emails?: string[] | null;
       subject: string | null;
       body_text: string | null;
+      body_html?: string | null;
       sent_at: string;
     }>;
   }>;

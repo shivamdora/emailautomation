@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { manualContactSchema } from "@/lib/zod/schemas";
 import { createManualContact } from "@/services/import-service";
+import { logActivity } from "@/services/activity-log-service";
 
 export async function POST(request: Request) {
   const payload = manualContactSchema.safeParse(await request.json());
@@ -21,6 +22,14 @@ export async function POST(request: Request) {
       company: payload.data.company,
       website: payload.data.website,
       jobTitle: payload.data.jobTitle,
+    });
+
+    await logActivity({
+      workspaceId: workspace.workspaceId,
+      actorUserId: workspace.userId,
+      action: "contact.created",
+      targetType: "contact",
+      targetId: contact.id,
     });
 
     return NextResponse.json({ contact });
