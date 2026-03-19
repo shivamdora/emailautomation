@@ -30,5 +30,7 @@ export async function GET(request: Request) {
     .setExpirationTime("10m")
     .sign(getStateSecret());
 
-  return NextResponse.redirect(createGoogleConnectUrl(state));
+  const redirectUri = new URL("/api/gmail/callback", request.url).toString();
+
+  return NextResponse.redirect(createGoogleConnectUrl(state, { redirectUri }));
 }

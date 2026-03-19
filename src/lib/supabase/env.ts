@@ -63,7 +63,6 @@ export const supabaseBrowserKey =
 export const isGoogleConfigured = Boolean(
   env.GOOGLE_CLIENT_ID &&
     env.GOOGLE_CLIENT_SECRET &&
-    env.GOOGLE_OAUTH_REDIRECT_URI &&
     env.TOKEN_ENCRYPTION_KEY,
 );
 
@@ -78,7 +77,7 @@ export function requireSupabaseConfiguration() {
 export function requireGoogleConfiguration() {
   if (!isGoogleConfigured) {
     throw new Error(
-      "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_OAUTH_REDIRECT_URI, and TOKEN_ENCRYPTION_KEY.",
+      "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and TOKEN_ENCRYPTION_KEY.",
     );
   }
 }

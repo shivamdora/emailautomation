@@ -18,8 +18,10 @@ Create a Web application OAuth client and set:
 
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
-- `GOOGLE_OAUTH_REDIRECT_URI`
 - `TOKEN_ENCRYPTION_KEY`
+
+`GOOGLE_OAUTH_REDIRECT_URI` is optional as a fixed fallback. By default, the app now derives
+the Gmail callback from the current request host and uses `/api/gmail/callback`.
 
 ## Scopes
 

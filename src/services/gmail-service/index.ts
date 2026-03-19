@@ -26,9 +26,19 @@ function createOAuthClient() {
   );
 }
 
-export function createGoogleConnectUrl(state: string) {
+function createOAuthClientWithRedirectUri(redirectUri?: string) {
   requireGoogleConfiguration();
-  const auth = createOAuthClient();
+
+  return new google.auth.OAuth2(
+    env.GOOGLE_CLIENT_ID,
+    env.GOOGLE_CLIENT_SECRET,
+    redirectUri ?? env.GOOGLE_OAUTH_REDIRECT_URI,
+  );
+}
+
+export function createGoogleConnectUrl(state: string, options?: { redirectUri?: string }) {
+  requireGoogleConfiguration();
+  const auth = createOAuthClientWithRedirectUri(options?.redirectUri);
   return auth.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
@@ -38,8 +48,8 @@ export function createGoogleConnectUrl(state: string) {
   });
 }
 
-export async function exchangeGoogleCode(code: string) {
-  const auth = createOAuthClient();
+export async function exchangeGoogleCode(code: string, options?: { redirectUri?: string }) {
+  const auth = createOAuthClientWithRedirectUri(options?.redirectUri);
   const { tokens } = await auth.getToken(code);
 
   if (!tokens.access_token) {

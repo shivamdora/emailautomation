@@ -35,11 +35,10 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
+    const redirectUri = new URL("/api/gmail/callback", request.url).toString();
 
     if (!code || !state) {
-      return NextResponse.redirect(
-        new URL("/profile?gmail=missing-code", env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
-      );
+      return NextResponse.redirect(new URL("/profile?gmail=missing-code", request.url));
     }
 
     const verified = await jwtVerify(state, getStateSecret());
@@ -48,7 +47,7 @@ export async function GET(request: Request) {
       workspaceId: string;
       userId: string;
     };
-    const tokens = await exchangeGoogleCode(code);
+    const tokens = await exchangeGoogleCode(code, { redirectUri });
     const account = await storeGmailConnection({
       workspaceId: payload.workspaceId,
       userId: payload.userId,
@@ -72,9 +71,7 @@ export async function GET(request: Request) {
       return redirectTo(desktopRedirect);
     }
 
-    return NextResponse.redirect(
-      new URL("/profile?gmail=connected", env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
-    );
+    return NextResponse.redirect(new URL("/profile?gmail=connected", request.url));
   } catch (error) {
     const message =
       error instanceof Error ? encodeURIComponent(error.message.slice(0, 160)) : "unknown-error";
@@ -89,11 +86,6 @@ export async function GET(request: Request) {
       return redirectTo(desktopRedirect);
     }
 
-    return NextResponse.redirect(
-      new URL(
-        `/profile?gmail=error&message=${message}`,
-        env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
-      ),
-    );
+    return NextResponse.redirect(new URL(`/profile?gmail=error&message=${message}`, request.url));
   }
 }

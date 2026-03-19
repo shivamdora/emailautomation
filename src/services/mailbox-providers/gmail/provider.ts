@@ -12,15 +12,11 @@ import {
 } from "@/services/mailbox-providers/types";
 
 function createOAuthClient() {
-  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.GOOGLE_OAUTH_REDIRECT_URI) {
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
     throw new Error("Google OAuth is not configured.");
   }
 
-  return new google.auth.OAuth2(
-    env.GOOGLE_CLIENT_ID,
-    env.GOOGLE_CLIENT_SECRET,
-    env.GOOGLE_OAUTH_REDIRECT_URI,
-  );
+  return new google.auth.OAuth2(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET);
 }
 
 function decodeBody(data?: string | null) {
