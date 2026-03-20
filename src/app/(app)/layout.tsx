@@ -34,6 +34,7 @@ export default async function ProtectedAppLayout({
     <AppShell
       activeProjectId={workspace.activeProjectId}
       projects={workspace.availableProjects}
+      shellTitle={workspace.workspaceLabel}
       workspaceName={workspace.workspaceName}
     >
       {children}

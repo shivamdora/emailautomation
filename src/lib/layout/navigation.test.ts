@@ -20,6 +20,7 @@ const items: ShellNavigationItem[] = [
     label: "Contacts",
     children: [{ href: "/imports", label: "Import Contact" }],
   },
+  { href: "/profile", label: "Profile" },
 ];
 
 describe("navigation helpers", () => {
@@ -31,5 +32,10 @@ describe("navigation helpers", () => {
   it("opens active parent groups by default", () => {
     expect(getDefaultOpenNavigationKeys(items, "/inbox")).toEqual(["/campaigns"]);
     expect(getDefaultOpenNavigationKeys(items, "/contacts")).toEqual(["/contacts"]);
+  });
+
+  it("keeps top-level profile navigation as a direct active leaf", () => {
+    expect(isNavigationItemActive(items[3], "/profile")).toBe(true);
+    expect(getDefaultOpenNavigationKeys(items, "/profile")).toEqual([]);
   });
 });

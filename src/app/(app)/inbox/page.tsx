@@ -3,31 +3,21 @@ import { PageHeader } from "@/components/layout/page-header";
 import { ThreadViewer } from "@/components/threads/thread-viewer";
 import { productContent } from "@/content/product";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { listThreads } from "@/services/analytics-service";
+import { getInboxThreadDetail, listInboxThreadSummaries } from "@/services/analytics-service";
 
 export default async function InboxPage() {
   const workspace = await getWorkspaceContext();
-  const threads = (await listThreads(workspace.workspaceId, {
+  const initialThreadBatch = await listInboxThreadSummaries(workspace.workspaceId, {
     projectId: workspace.activeProjectId,
-  })) as Array<{
-    id: string;
-    subject: string | null;
-    snippet: string | null;
-    latest_message_at: string | null;
-    campaign_contact_id?: string | null;
-    campaign_status?: string | null;
-    reply_disposition?: string | null;
-    messages: Array<{
-      id: string;
-      direction: string;
-      from_email: string | null;
-      to_emails?: string[] | null;
-      subject: string | null;
-      body_text: string | null;
-      body_html?: string | null;
-      sent_at: string;
-    }>;
-  }>;
+    limit: 10,
+    offset: 0,
+  });
+  const initialSelectedThread =
+    initialThreadBatch.threads[0]
+      ? await getInboxThreadDetail(workspace.workspaceId, initialThreadBatch.threads[0].id, {
+          projectId: workspace.activeProjectId,
+        })
+      : null;
 
   return (
     <div className="grid gap-8">
@@ -42,7 +32,11 @@ export default async function InboxPage() {
           />
         }
       />
-      <ThreadViewer threads={threads} />
+      <ThreadViewer
+        initialHasMore={initialThreadBatch.hasMore}
+        initialSelectedThread={initialSelectedThread}
+        initialThreads={initialThreadBatch.threads}
+      />
     </div>
   );
 }

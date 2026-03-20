@@ -487,6 +487,10 @@ export const productContent: ProductContent = {
         label: "Contacts",
         children: [{ href: "/imports", label: "Import Contact" }],
       },
+      {
+        href: "/profile",
+        label: "Profile",
+      },
     ],
     helper: {
       title: "Project quick actions",
@@ -791,8 +795,8 @@ export const productContent: ProductContent = {
     },
     newCampaign: {
       eyebrow: "Campaign builder",
-      title: "Launch a campaign",
-      description: "Choose the sender, audience, schedule, and workflow in one place.",
+      title: "Create a campaign",
+      description: "Choose a starting point, pick the audience, shape the message, and launch with confidence.",
     },
     editCampaign: {
       eyebrow: "Campaign editor",

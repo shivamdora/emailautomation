@@ -1,4 +1,9 @@
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import {
+  mapInboxThreadDetail,
+  mapInboxThreadSummary,
+  type InboxThreadMessage,
+} from "@/lib/inbox/threads";
 import { requireSupabaseConfiguration } from "@/lib/supabase/env";
 import { isMissingColumnResult } from "@/lib/utils/supabase-schema";
 
@@ -200,4 +205,173 @@ export async function listThreads(workspaceId: string, options?: { projectId?: s
         sent_at: string;
       }> | null) ?? []) || [],
   }));
+}
+
+type RawInboxThreadRecord = {
+  id: string;
+  subject: string | null;
+  latest_message_at: string | null;
+  campaign_contact_id?: string | null;
+  campaign_contact?: { status?: string | null; reply_disposition?: string | null } | null;
+  thread_messages: Array<{
+    id: string;
+    direction: string;
+    from_email: string | null;
+    to_emails: string[] | null;
+    subject: string | null;
+    body_text: string | null;
+    body_html: string | null;
+    sent_at: string;
+  }> | null;
+};
+
+type InboxQueryError = {
+  message?: string | null;
+  code?: string | null;
+  details?: string | null;
+  hint?: string | null;
+} | null;
+
+type InboxRangeResult = Promise<{ data: unknown; error: InboxQueryError; status?: number | null }>;
+type InboxSingleResult = Promise<{ data: unknown; error: InboxQueryError; status?: number | null }>;
+
+type InboxThreadsListQuery = {
+  eq: (column: string, value: string) => InboxThreadsListQuery;
+  order: (
+    column: string,
+    options?: { ascending?: boolean },
+  ) => { range: (from: number, to: number) => InboxRangeResult };
+};
+
+type InboxThreadDetailQuery = {
+  eq: (column: string, value: string) => InboxThreadDetailQuery;
+  maybeSingle: () => InboxSingleResult;
+};
+
+const inboxThreadsSelect =
+  "id, subject, latest_message_at, campaign_contact_id, campaign_contact:campaign_contacts(status, reply_disposition), thread_messages(id, direction, from_email, to_emails, subject, body_text, body_html, sent_at)";
+
+function createInboxThreadsListQuery(workspaceId: string, projectId?: string) {
+  const supabase = createAdminSupabaseClient();
+  let query = supabase
+    .from("message_threads")
+    .select(inboxThreadsSelect)
+    .eq("workspace_id", workspaceId) as unknown as InboxThreadsListQuery;
+
+  if (projectId) {
+    query = query.eq("project_id", projectId);
+  }
+
+  return query;
+}
+
+function createInboxThreadDetailQuery(workspaceId: string, threadId: string, projectId?: string) {
+  let query = createAdminSupabaseClient()
+    .from("message_threads")
+    .select(inboxThreadsSelect)
+    .eq("workspace_id", workspaceId)
+    .eq("id", threadId) as unknown as InboxThreadDetailQuery;
+
+  if (projectId) {
+    query = query.eq("project_id", projectId);
+  }
+
+  return query;
+}
+
+function mapRawInboxThread(thread: RawInboxThreadRecord) {
+  return {
+    id: thread.id,
+    subject: thread.subject,
+    latest_message_at: thread.latest_message_at,
+    campaign_contact_id: thread.campaign_contact_id ?? null,
+    campaign_status: thread.campaign_contact?.status ?? null,
+    reply_disposition: thread.campaign_contact?.reply_disposition ?? null,
+    messages:
+      ((thread.thread_messages as InboxThreadMessage[] | null) ?? []).map((message) => ({
+        ...message,
+        body_html: message.body_html ?? null,
+      })),
+  };
+}
+
+export async function listInboxThreadSummaries(
+  workspaceId: string,
+  options?: { projectId?: string; limit?: number; offset?: number },
+) {
+  requireSupabaseConfiguration();
+
+  const limit = Math.max(1, Math.min(options?.limit ?? 10, 50));
+  const offset = Math.max(0, options?.offset ?? 0);
+  let result = await createInboxThreadsListQuery(workspaceId, options?.projectId)
+    .order("latest_message_at", { ascending: false })
+    .range(offset, offset + limit);
+
+  if (isMissingColumnResult(result, "campaign_contacts", "reply_disposition")) {
+    let fallbackQuery = createAdminSupabaseClient()
+      .from("message_threads")
+      .select(
+        "id, subject, latest_message_at, campaign_contact_id, campaign_contact:campaign_contacts(status), thread_messages(id, direction, from_email, to_emails, subject, body_text, body_html, sent_at)",
+      )
+      .eq("workspace_id", workspaceId) as unknown as InboxThreadsListQuery;
+
+    if (options?.projectId) {
+      fallbackQuery = fallbackQuery.eq("project_id", options.projectId);
+    }
+
+    result = await fallbackQuery.order("latest_message_at", { ascending: false }).range(offset, offset + limit);
+  }
+
+  const { data, error } = result;
+
+  if (error) {
+    throw error;
+  }
+
+  const threads = ((data ?? []) as RawInboxThreadRecord[]).map((thread) =>
+    mapInboxThreadSummary(mapRawInboxThread(thread)),
+  );
+
+  return {
+    threads: threads.slice(0, limit),
+    hasMore: threads.length > limit,
+  };
+}
+
+export async function getInboxThreadDetail(
+  workspaceId: string,
+  threadId: string,
+  options?: { projectId?: string },
+) {
+  requireSupabaseConfiguration();
+
+  let result = await createInboxThreadDetailQuery(workspaceId, threadId, options?.projectId).maybeSingle();
+
+  if (isMissingColumnResult(result, "campaign_contacts", "reply_disposition")) {
+    let fallbackQuery = createAdminSupabaseClient()
+      .from("message_threads")
+      .select(
+        "id, subject, latest_message_at, campaign_contact_id, campaign_contact:campaign_contacts(status), thread_messages(id, direction, from_email, to_emails, subject, body_text, body_html, sent_at)",
+      )
+      .eq("workspace_id", workspaceId)
+      .eq("id", threadId) as unknown as InboxThreadDetailQuery;
+
+    if (options?.projectId) {
+      fallbackQuery = fallbackQuery.eq("project_id", options.projectId);
+    }
+
+    result = await fallbackQuery.maybeSingle();
+  }
+
+  const { data, error } = result;
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return mapInboxThreadDetail(mapRawInboxThread(data as RawInboxThreadRecord));
 }

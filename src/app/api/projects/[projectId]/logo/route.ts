@@ -6,14 +6,6 @@ type RouteParams = {
   params: Promise<{ projectId: string }>;
 };
 
-function redirectTo(url: URL, searchParams: Record<string, string>) {
-  for (const [key, value] of Object.entries(searchParams)) {
-    url.searchParams.set(key, value);
-  }
-
-  return NextResponse.redirect(url);
-}
-
 export async function POST(request: Request, { params }: RouteParams) {
   const { projectId } = await params;
   const workspace = await getWorkspaceContext();
@@ -29,15 +21,14 @@ export async function POST(request: Request, { params }: RouteParams) {
       logoUrl,
     });
 
-    return redirectTo(new URL("/settings/projects", request.url), {
-      status: "logo-updated",
+    return NextResponse.json({
+      ok: true,
+      message: "Project logo updated.",
       projectId: result.projectId,
+      logoUrl: result.logoUrl,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update project logo.";
-    return redirectTo(new URL("/settings/projects", request.url), {
-      status: "error",
-      message,
-    });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
