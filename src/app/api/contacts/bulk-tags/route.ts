@@ -15,6 +15,7 @@ export async function POST(request: Request) {
     const workspace = await getWorkspaceContext();
     const result = await bulkTagContacts({
       workspaceId: workspace.workspaceId,
+      projectId: workspace.activeProjectId,
       contactIds: payload.data.contactIds,
       tagNames: payload.data.tagNames,
       operation: payload.data.operation,

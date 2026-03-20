@@ -8,8 +8,8 @@ import { listContacts, listWorkspaceContactTags } from "@/services/import-servic
 export default async function ContactsPage() {
   const workspace = await getWorkspaceContext();
   const [contacts, tags] = await Promise.all([
-    listContacts(workspace.workspaceId),
-    listWorkspaceContactTags(workspace.workspaceId),
+    listContacts(workspace.workspaceId, workspace.activeProjectId),
+    listWorkspaceContactTags(workspace.workspaceId, workspace.activeProjectId),
   ]);
 
   return (

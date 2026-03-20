@@ -25,6 +25,7 @@ type NestedContactTagMember =
 
 type ImportContactPayload = {
   workspace_id: string;
+  project_id: string;
   owner_user_id: string;
   email: string;
   first_name: string | null;
@@ -109,6 +110,7 @@ function isSchemaCacheError(error: { message?: string | null; details?: string |
 
 async function selectContactsWithTags(input: {
   workspaceId?: string;
+  projectId?: string;
   contactIds?: string[];
 }) {
   const supabase = createAdminSupabaseClient();
@@ -116,6 +118,10 @@ async function selectContactsWithTags(input: {
 
   if (input.workspaceId) {
     query = query.eq("workspace_id", input.workspaceId);
+  }
+
+  if (input.projectId) {
+    query = query.eq("project_id", input.projectId);
   }
 
   if (input.contactIds?.length) {
@@ -131,6 +137,10 @@ async function selectContactsWithTags(input: {
 
     if (input.workspaceId) {
       fallbackQuery = fallbackQuery.eq("workspace_id", input.workspaceId);
+    }
+
+    if (input.projectId) {
+      fallbackQuery = fallbackQuery.eq("project_id", input.projectId);
     }
 
     if (input.contactIds?.length) {
@@ -206,7 +216,7 @@ export function mapImportRow(row: ParsedImportRow) {
   };
 }
 
-export async function listWorkspaceContactTags(workspaceId: string) {
+export async function listWorkspaceContactTags(workspaceId: string, projectId: string) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
@@ -214,6 +224,7 @@ export async function listWorkspaceContactTags(workspaceId: string) {
     .from("contact_tags")
     .select("id, name")
     .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId)
     .order("name", { ascending: true });
 
   if (error) {
@@ -226,7 +237,7 @@ export async function listWorkspaceContactTags(workspaceId: string) {
   return (data ?? []) as ContactTag[];
 }
 
-async function ensureWorkspaceTags(workspaceId: string, tagNames: string[]) {
+async function ensureWorkspaceTags(workspaceId: string, projectId: string, tagNames: string[]) {
   const normalizedNames = parseTagNames(tagNames);
 
   if (!normalizedNames.length) {
@@ -234,7 +245,7 @@ async function ensureWorkspaceTags(workspaceId: string, tagNames: string[]) {
   }
 
   const supabase = createAdminSupabaseClient();
-  const existingTags = await listWorkspaceContactTags(workspaceId);
+  const existingTags = await listWorkspaceContactTags(workspaceId, projectId);
   const existingByNormalized = new Map(
     existingTags.map((tag) => [tag.name.toLowerCase(), tag]),
   );
@@ -246,6 +257,7 @@ async function ensureWorkspaceTags(workspaceId: string, tagNames: string[]) {
       .insert(
         missingNames.map((name) => ({
           workspace_id: workspaceId,
+          project_id: projectId,
           name,
         })),
       )
@@ -268,9 +280,9 @@ async function ensureWorkspaceTags(workspaceId: string, tagNames: string[]) {
     .filter((value): value is ContactTag => Boolean(value));
 }
 
-async function replaceContactTags(contactId: string, tagNames: string[], workspaceId: string) {
+async function replaceContactTags(contactId: string, tagNames: string[], workspaceId: string, projectId: string) {
   const supabase = createAdminSupabaseClient();
-  const tags = await ensureWorkspaceTags(workspaceId, tagNames);
+  const tags = await ensureWorkspaceTags(workspaceId, projectId, tagNames);
 
   const deleteResult = await supabase.from("contact_tag_members").delete().eq("contact_id", contactId);
 
@@ -300,8 +312,8 @@ async function replaceContactTags(contactId: string, tagNames: string[], workspa
   }
 }
 
-async function addTagsToContacts(contactIds: string[], tagNames: string[], workspaceId: string) {
-  const tags = await ensureWorkspaceTags(workspaceId, tagNames);
+async function addTagsToContacts(contactIds: string[], tagNames: string[], workspaceId: string, projectId: string) {
+  const tags = await ensureWorkspaceTags(workspaceId, projectId, tagNames);
 
   if (!contactIds.length || !tags.length) {
     return;
@@ -326,13 +338,13 @@ async function addTagsToContacts(contactIds: string[], tagNames: string[], works
   }
 }
 
-async function removeTagsFromContacts(contactIds: string[], tagNames: string[], workspaceId: string) {
+async function removeTagsFromContacts(contactIds: string[], tagNames: string[], workspaceId: string, projectId: string) {
   if (!contactIds.length || !tagNames.length) {
     return;
   }
 
   const normalizedNames = new Set(parseTagNames(tagNames).map((name) => name.toLowerCase()));
-  const existingTags = await listWorkspaceContactTags(workspaceId);
+  const existingTags = await listWorkspaceContactTags(workspaceId, projectId);
   const tags = existingTags.filter((tag) => normalizedNames.has(tag.name.toLowerCase()));
 
   if (!tags.length) {
@@ -356,6 +368,7 @@ async function removeTagsFromContacts(contactIds: string[], tagNames: string[], 
 
 async function assignImportedTags(input: {
   workspaceId: string;
+  projectId: string;
   contactsByEmail: Map<string, { id: string; email: string }>;
   tagsByEmail: Map<string, string[]>;
 }) {
@@ -365,7 +378,7 @@ async function assignImportedTags(input: {
     return;
   }
 
-  const tags = await ensureWorkspaceTags(input.workspaceId, tagNames);
+  const tags = await ensureWorkspaceTags(input.workspaceId, input.projectId, tagNames);
   const tagIdsByName = new Map(tags.map((tag) => [tag.name.toLowerCase(), tag.id]));
   const assignments = Array.from(input.tagsByEmail.entries()).flatMap(([email, names]) => {
     const contact = input.contactsByEmail.get(email);
@@ -397,13 +410,14 @@ async function assignImportedTags(input: {
   }
 }
 
-export async function listContacts(workspaceId: string) {
+export async function listContacts(workspaceId: string, projectId: string) {
   requireSupabaseConfiguration();
-  return selectContactsWithTags({ workspaceId });
+  return selectContactsWithTags({ workspaceId, projectId });
 }
 
 export async function createManualContact(input: {
   workspaceId: string;
+  projectId: string;
   userId: string;
   email: string;
   firstName?: string | null;
@@ -420,6 +434,7 @@ export async function createManualContact(input: {
     .from("contacts")
     .insert({
       workspace_id: input.workspaceId,
+      project_id: input.projectId,
       owner_user_id: input.userId,
       email: normalizeEmail(input.email),
       first_name: input.firstName?.trim() || null,
@@ -434,7 +449,7 @@ export async function createManualContact(input: {
 
   if (error) {
     if (/duplicate key value/i.test(error.message)) {
-      throw new Error("Contact already exists in this workspace.");
+      throw new Error("Contact already exists in this project.");
     }
 
     throw error;
@@ -443,7 +458,7 @@ export async function createManualContact(input: {
   const contactId = (data as { id: string }).id;
 
   if (input.tagNames?.length) {
-    await replaceContactTags(contactId, input.tagNames, input.workspaceId);
+    await replaceContactTags(contactId, input.tagNames, input.workspaceId, input.projectId);
   }
 
   const [contact] = await getContactsByIds([contactId]);
@@ -452,6 +467,7 @@ export async function createManualContact(input: {
 
 export async function updateContact(input: {
   workspaceId: string;
+  projectId: string;
   contactId: string;
   email: string;
   firstName?: string | null;
@@ -475,7 +491,8 @@ export async function updateContact(input: {
       job_title: input.jobTitle?.trim() || null,
     })
     .eq("id", input.contactId)
-    .eq("workspace_id", input.workspaceId);
+    .eq("workspace_id", input.workspaceId)
+    .eq("project_id", input.projectId);
 
   if (error) {
     if (/duplicate key value/i.test(error.message)) {
@@ -485,13 +502,13 @@ export async function updateContact(input: {
     throw error;
   }
 
-  await replaceContactTags(input.contactId, input.tagNames ?? [], input.workspaceId);
+  await replaceContactTags(input.contactId, input.tagNames ?? [], input.workspaceId, input.projectId);
 
   const [contact] = await getContactsByIds([input.contactId]);
   return contact;
 }
 
-export async function deleteContact(workspaceId: string, contactId: string) {
+export async function deleteContact(workspaceId: string, projectId: string, contactId: string) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
@@ -499,6 +516,7 @@ export async function deleteContact(workspaceId: string, contactId: string) {
     .from("contacts")
     .delete()
     .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId)
     .eq("id", contactId);
 
   if (error) {
@@ -508,7 +526,7 @@ export async function deleteContact(workspaceId: string, contactId: string) {
   return { contactId };
 }
 
-export async function bulkDeleteContacts(workspaceId: string, contactIds: string[]) {
+export async function bulkDeleteContacts(workspaceId: string, projectId: string, contactIds: string[]) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
@@ -516,6 +534,7 @@ export async function bulkDeleteContacts(workspaceId: string, contactIds: string
     .from("contacts")
     .delete()
     .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId)
     .in("id", contactIds);
 
   if (error) {
@@ -527,6 +546,7 @@ export async function bulkDeleteContacts(workspaceId: string, contactIds: string
 
 export async function bulkTagContacts(input: {
   workspaceId: string;
+  projectId: string;
   contactIds: string[];
   tagNames: string[];
   operation: "add" | "remove";
@@ -534,9 +554,9 @@ export async function bulkTagContacts(input: {
   requireSupabaseConfiguration();
 
   if (input.operation === "add") {
-    await addTagsToContacts(input.contactIds, input.tagNames, input.workspaceId);
+    await addTagsToContacts(input.contactIds, input.tagNames, input.workspaceId, input.projectId);
   } else {
-    await removeTagsFromContacts(input.contactIds, input.tagNames, input.workspaceId);
+    await removeTagsFromContacts(input.contactIds, input.tagNames, input.workspaceId, input.projectId);
   }
 
   return {
@@ -546,7 +566,7 @@ export async function bulkTagContacts(input: {
   };
 }
 
-export async function listImports(workspaceId: string) {
+export async function listImports(workspaceId: string, projectId: string) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
@@ -554,6 +574,7 @@ export async function listImports(workspaceId: string) {
     .from("imports")
     .select("id, file_name, source_type, status, imported_count, created_at")
     .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -572,6 +593,7 @@ export async function listImports(workspaceId: string) {
 
 export async function processImportFile(input: {
   workspaceId: string;
+  projectId: string;
   userId: string;
   fileName: string;
   fileBuffer: ArrayBuffer;
@@ -591,6 +613,7 @@ export async function processImportFile(input: {
     .from("imports")
     .insert({
       workspace_id: input.workspaceId,
+      project_id: input.projectId,
       owner_user_id: input.userId,
       file_name: input.fileName,
       source_type: input.sourceType,
@@ -631,6 +654,7 @@ export async function processImportFile(input: {
 
         accumulator.set(email, {
           workspace_id: input.workspaceId,
+          project_id: input.projectId,
           owner_user_id: input.userId,
           email,
           first_name: row.first_name,
@@ -656,6 +680,7 @@ export async function processImportFile(input: {
       .from("contacts")
       .select("id, email")
       .eq("workspace_id", input.workspaceId)
+      .eq("project_id", input.projectId)
       .in("email", emails);
 
     if (existingContactsError) {
@@ -676,6 +701,7 @@ export async function processImportFile(input: {
       const { error: insertError } = await supabase.from("contacts").insert(
         contactsToInsert.map((contact) => ({
           workspace_id: contact.workspace_id,
+          project_id: contact.project_id,
           owner_user_id: contact.owner_user_id,
           email: contact.email,
           first_name: contact.first_name,
@@ -722,6 +748,7 @@ export async function processImportFile(input: {
       .from("contacts")
       .select("id, email")
       .eq("workspace_id", input.workspaceId)
+      .eq("project_id", input.projectId)
       .in("email", emails);
 
     if (importedContactsError) {
@@ -737,6 +764,7 @@ export async function processImportFile(input: {
 
     await assignImportedTags({
       workspaceId: input.workspaceId,
+      projectId: input.projectId,
       contactsByEmail,
       tagsByEmail: new Map(dedupedContacts.map((contact) => [contact.email, contact.tags])),
     });
@@ -760,6 +788,7 @@ export async function processImportFile(input: {
 
 export async function importFromGoogleSheet(input: {
   workspaceId: string;
+  projectId: string;
   userId: string;
   url: string;
 }) {
@@ -780,6 +809,7 @@ export async function importFromGoogleSheet(input: {
 
   return processImportFile({
     workspaceId: input.workspaceId,
+    projectId: input.projectId,
     userId: input.userId,
     fileName: "google-sheet.csv",
     fileBuffer: buffer,

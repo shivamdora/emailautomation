@@ -19,6 +19,7 @@ export async function PUT(
     const { campaignId } = await context.params;
     const result = await updateCampaign({
       workspaceId: workspace.workspaceId,
+      projectId: workspace.activeProjectId,
       campaignId,
       campaignName: payload.data.campaignName,
       gmailAccountId: payload.data.gmailAccountId,
@@ -52,7 +53,7 @@ export async function DELETE(
   try {
     const workspace = await getWorkspaceContext();
     const { campaignId } = await context.params;
-    const result = await deleteCampaign(campaignId, workspace.workspaceId);
+    const result = await deleteCampaign(campaignId, workspace.workspaceId, workspace.activeProjectId);
 
     await logActivity({
       workspaceId: workspace.workspaceId,

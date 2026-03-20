@@ -17,7 +17,11 @@ export async function POST(request: Request) {
     }
 
     const workspace = await getWorkspaceContext();
-    const result = await sendCampaignNow(payload.data.campaignId, workspace.workspaceId);
+    const result = await sendCampaignNow(
+      payload.data.campaignId,
+      workspace.workspaceId,
+      workspace.activeProjectId,
+    );
 
     if (contentType.includes("application/json")) {
       return NextResponse.json(result);

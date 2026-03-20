@@ -14,6 +14,7 @@ export async function POST(request: Request) {
   const workspace = await getWorkspaceContext();
   const result = await createCampaign({
     workspaceId: workspace.workspaceId,
+    projectId: workspace.activeProjectId,
     userId: workspace.userId,
     ...payload.data,
   });

@@ -43,7 +43,7 @@ function getImportBanner(status?: string, error?: string, count?: string) {
 export default async function ImportsPage({ searchParams }: ImportsPageProps) {
   const params = (await searchParams) ?? {};
   const workspace = await getWorkspaceContext();
-  const imports = (await listImports(workspace.workspaceId)) as Array<{
+  const imports = (await listImports(workspace.workspaceId, workspace.activeProjectId)) as Array<{
     id: string;
     file_name: string | null;
     source_type: string;

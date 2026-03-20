@@ -1,7 +1,4 @@
-type ShellNavigationItem = {
-  href: string;
-  label: string;
-};
+import type { ShellNavigationItem } from "@/lib/layout/navigation";
 
 type AuthModeCopy = {
   badge: string;
@@ -92,6 +89,13 @@ type ProductContent = {
     chartTitle: string;
     checklistTitle: string;
     checklist: string[];
+  };
+  analytics: {
+    title: string;
+    description: string;
+    allProjectsLabel: string;
+    projectBreakdownTitle: string;
+    campaignChartTitle: string;
   };
   contacts: {
     header: {
@@ -459,21 +463,34 @@ export const productContent: ProductContent = {
   shell: {
     brand: {
       name: "OutboundFlow",
-      subtitle: "Workspace Console",
+      subtitle: "Project Console",
     },
     navigation: [
-      { href: "/dashboard", label: "Dashboard" },
-      { href: "/contacts", label: "Contacts" },
-      { href: "/imports", label: "Imports" },
-      { href: "/templates", label: "Templates" },
-      { href: "/campaigns", label: "Campaigns" },
-      { href: "/inbox", label: "Inbox" },
-      { href: "/settings", label: "Workspace" },
-      { href: "/profile", label: "Profile" },
+      {
+        href: "/dashboard",
+        label: "Dashboard",
+      },
+      {
+        href: "/analytics",
+        label: "Analytics",
+      },
+      {
+        href: "/campaigns",
+        label: "Campaigns",
+        children: [
+          { href: "/templates", label: "Email Templates" },
+          { href: "/inbox", label: "Inbox" },
+        ],
+      },
+      {
+        href: "/contacts",
+        label: "Contacts",
+        children: [{ href: "/imports", label: "Import Contact" }],
+      },
     ],
     helper: {
-      title: "Workspace quick actions",
-      description: "Connect the sender mailbox and keep common workspace actions close at hand.",
+      title: "Project quick actions",
+      description: "Keep sender setup and the most-used project actions close without bloating the sidebar.",
     },
     signOutLabel: "Sign out",
   },
@@ -567,7 +584,7 @@ export const productContent: ProductContent = {
   dashboard: {
     title: "Dashboard",
     description:
-      "Track list size, sends, replies, and the next actions that get this workspace live.",
+      "Track total list size, sends, replies, and cross-project momentum from one global workspace view.",
     liveRefreshLabel: "Auto refresh while active",
     kpis: {
       totalLeads: "Total leads",
@@ -588,11 +605,19 @@ export const productContent: ProductContent = {
       "Launch a campaign and keep this page open while sends and replies sync.",
     ],
   },
+  analytics: {
+    title: "Analytics",
+    description:
+      "Review delivery, replies, failures, and campaign performance for the active project or across all projects.",
+    allProjectsLabel: "All Projects",
+    projectBreakdownTitle: "Project breakdown",
+    campaignChartTitle: "Reply rate by campaign",
+  },
   contacts: {
     header: {
       eyebrow: "Contacts",
-      title: "Workspace contacts",
-      description: "Add leads, review the shared list, and keep tags organized.",
+      title: "Project contacts",
+      description: "Add leads, review the active project list, and keep tags organized.",
     },
     manualForm: {
       title: "Add a contact",
@@ -625,8 +650,8 @@ export const productContent: ProductContent = {
       selectedLabel: "selected",
       cards: {
         contacts: {
-          eyebrow: "Workspace contacts",
-          description: "Total leads available in this workspace.",
+          eyebrow: "Project contacts",
+          description: "Total leads available in the active project.",
         },
         selection: {
           eyebrow: "Visible selection",
@@ -692,7 +717,7 @@ export const productContent: ProductContent = {
       eyebrow: "Imports",
       title: "Import leads",
       description:
-        "Bring in CSV or XLSX files or a public Google Sheet and keep the raw import history visible.",
+        "Bring in CSV or XLSX files or a public Google Sheet for the active project and keep the raw import history visible.",
     },
     banners: {
       fileUploaded: (count) => `File import completed. ${count ?? "0"} contact(s) were processed.`,
@@ -725,9 +750,9 @@ export const productContent: ProductContent = {
   templates: {
     header: {
       eyebrow: "Templates",
-      title: "Template library",
+      title: "Email Templates",
       description:
-        "Save text or HTML templates with merge fields like {{first_name}} and {{company}}.",
+        "Browse featured templates, manage the active project library, and launch a campaign with the right starting point.",
     },
     table: {
       title: "Saved templates",
@@ -819,7 +844,7 @@ export const productContent: ProductContent = {
       senderEmptyLabel: "No mailbox connected",
       senderHelperTitle: "Connect Gmail before launch",
       senderHelperDescription:
-        "This workspace does not have a connected Gmail mailbox yet. Connect one from Profile before you launch or send.",
+        "This project does not have a connected Gmail mailbox yet. Connect one from Profile before you launch or send.",
       senderHelperCta: "Open Profile",
       targetContactsLabel: "Target contacts",
       targetContactsSummary: (count) => `${count} selected across the full list`,
@@ -919,7 +944,7 @@ export const productContent: ProductContent = {
     header: {
       eyebrow: "Profile",
       title: "Personal settings",
-      description: "Keep your profile current and connect the Gmail mailbox you send from.",
+      description: "Keep your profile current, review project branding, and connect the Gmail mailboxes you send from.",
     },
     banners: {
       connected: "Gmail mailbox connected successfully.",
@@ -942,7 +967,7 @@ export const productContent: ProductContent = {
       connectLabel: "Connect Gmail",
       emptyTitle: "No Gmail mailbox connected",
       emptyDescription:
-        "Connect the mailbox you want to send from so campaigns and replies can stay tied to the workspace.",
+        "Connect the mailbox you want to send from so campaigns and replies stay tied to the right project.",
       disconnectLabel: "Disconnect",
     },
   },

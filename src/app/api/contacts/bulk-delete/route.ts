@@ -13,7 +13,11 @@ export async function POST(request: Request) {
 
   try {
     const workspace = await getWorkspaceContext();
-    const result = await bulkDeleteContacts(workspace.workspaceId, payload.data.contactIds);
+    const result = await bulkDeleteContacts(
+      workspace.workspaceId,
+      workspace.activeProjectId,
+      payload.data.contactIds,
+    );
 
     await logActivity({
       workspaceId: workspace.workspaceId,

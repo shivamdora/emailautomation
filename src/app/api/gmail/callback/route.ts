@@ -27,6 +27,7 @@ export async function GET(request: Request) {
     | {
         desktopReturnUrl?: string | null;
         workspaceId: string;
+        projectId: string;
         userId: string;
       }
     | null = null;
@@ -43,13 +44,15 @@ export async function GET(request: Request) {
 
     const verified = await jwtVerify(state, getStateSecret());
     payload = verified.payload as {
-      desktopReturnUrl?: string | null;
-      workspaceId: string;
-      userId: string;
-    };
+        desktopReturnUrl?: string | null;
+        workspaceId: string;
+        projectId: string;
+        userId: string;
+      };
     const tokens = await exchangeGoogleCode(code, { redirectUri });
     const account = await storeGmailConnection({
       workspaceId: payload.workspaceId,
+      projectId: payload.projectId,
       userId: payload.userId,
       ...tokens,
     });

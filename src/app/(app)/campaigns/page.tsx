@@ -11,7 +11,7 @@ import { listCampaigns } from "@/services/campaign-service";
 
 export default async function CampaignsPage() {
   const workspace = await getWorkspaceContext();
-  const campaigns = (await listCampaigns(workspace.workspaceId)) as Array<{
+  const campaigns = (await listCampaigns(workspace.workspaceId, workspace.activeProjectId)) as Array<{
     id: string;
     name: string;
     status: string;

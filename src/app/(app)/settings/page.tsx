@@ -38,6 +38,9 @@ export default async function SettingsPage({
   const latestCrmKey = typeof params.crmKey === "string" ? params.crmKey : null;
   const latestWebhookSecret =
     typeof params.crmWebhookSecret === "string" ? params.crmWebhookSecret : null;
+  const workspaceStatus = typeof params.status === "string" ? params.status : null;
+  const workspaceMessage =
+    typeof params.workspaceMessage === "string" ? decodeURIComponent(params.workspaceMessage) : null;
 
   return (
     <div className="grid gap-8">
@@ -45,6 +48,11 @@ export default async function SettingsPage({
         eyebrow="Operations console"
         title={workspace.workspaceName}
         description="Manage entitlements, approved senders, CRM sync, and Gmail seed placement telemetry from one production-ready control surface."
+        actions={
+          <Button asChild size="sm" variant="outline">
+            <Link href="/settings/projects">Manage projects</Link>
+          </Button>
+        }
       />
 
       {latestCrmKey || latestWebhookSecret ? (
@@ -63,6 +71,51 @@ export default async function SettingsPage({
           </CardContent>
         </Card>
       ) : null}
+
+      {workspaceStatus === "workspace-switched" || workspaceMessage ? (
+        <div
+          className={
+            workspaceStatus === "workspace-switched"
+              ? "rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700"
+              : "rounded-2xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger"
+          }
+        >
+          {workspaceStatus === "workspace-switched"
+            ? "Workspace switched successfully."
+            : workspaceMessage}
+        </div>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Workspace access</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          {workspace.availableWorkspaces.map((item) => (
+            <div
+              key={item.id}
+              className="glass-control flex flex-wrap items-center justify-between gap-3 rounded-[1.25rem] px-4 py-3"
+            >
+              <div>
+                <p className="font-medium">{item.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  {item.kind} / {item.role}
+                </p>
+              </div>
+              {item.id === workspace.workspaceId ? (
+                <Badge variant="success">Active workspace</Badge>
+              ) : (
+                <form action="/api/workspace/active" method="post">
+                  <input type="hidden" name="workspaceId" value={item.id} />
+                  <Button size="sm" type="submit" variant="outline">
+                    Switch workspace
+                  </Button>
+                </form>
+              )}
+            </div>
+          ))}
+        </CardContent>
+      </Card>
 
       <section className="grid gap-4 xl:grid-cols-4">
         <Card>

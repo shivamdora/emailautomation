@@ -115,6 +115,7 @@ export async function exchangeGoogleCode(code: string, options?: { redirectUri?:
 
 export async function storeGmailConnection(input: {
   workspaceId: string;
+  projectId: string;
   userId: string;
   emailAddress: string;
   accessToken: string;
@@ -130,6 +131,7 @@ export async function storeGmailConnection(input: {
     .upsert(
       {
         workspace_id: input.workspaceId,
+        project_id: input.projectId,
         user_id: input.userId,
         provider: "gmail",
         email_address: input.emailAddress,
@@ -139,7 +141,7 @@ export async function storeGmailConnection(input: {
         scopes: input.scopes,
         status: "active",
       },
-      { onConflict: "workspace_id,provider,email_address" },
+      { onConflict: "project_id,provider,email_address" },
     )
     .select("id")
     .single();
@@ -154,6 +156,7 @@ export async function storeGmailConnection(input: {
     .upsert(
       {
         workspace_id: input.workspaceId,
+        project_id: input.projectId,
         user_id: input.userId,
         oauth_connection_id: oauthConnection.id,
         email_address: input.emailAddress,
@@ -165,7 +168,7 @@ export async function storeGmailConnection(input: {
         approval_note: "Awaiting workspace approval",
         daily_send_count: 0,
       },
-      { onConflict: "workspace_id,email_address" },
+      { onConflict: "project_id,email_address" },
     )
     .select("id, email_address, approval_status")
     .single();
@@ -176,6 +179,7 @@ export async function storeGmailConnection(input: {
       .upsert(
         {
           workspace_id: input.workspaceId,
+          project_id: input.projectId,
           user_id: input.userId,
           oauth_connection_id: oauthConnection.id,
           email_address: input.emailAddress,
@@ -183,7 +187,7 @@ export async function storeGmailConnection(input: {
           status: "active",
           daily_send_count: 0,
         },
-        { onConflict: "workspace_id,email_address" },
+        { onConflict: "project_id,email_address" },
       )
       .select("id, email_address")
       .single();
@@ -202,7 +206,7 @@ export async function storeGmailConnection(input: {
 
 export async function getWorkspaceGmailAccounts(
   workspaceId: string,
-  options?: { onlyApproved?: boolean },
+  options?: { onlyApproved?: boolean; projectId?: string },
 ) {
   requireSupabaseConfiguration();
 
@@ -211,6 +215,10 @@ export async function getWorkspaceGmailAccounts(
     .from("gmail_accounts")
     .select("id, email_address, status, health_status, approval_status, approved_at, approval_note, user_id, last_synced_at")
     .eq("workspace_id", workspaceId);
+
+  if (options?.projectId) {
+    query = query.eq("project_id", options.projectId);
+  }
 
   if (options?.onlyApproved) {
     query = query.eq("approval_status", "approved");
@@ -225,11 +233,16 @@ export async function getWorkspaceGmailAccounts(
       { table: "gmail_accounts", column: "approval_note" },
     ])
   ) {
-    result = await supabase
+    let fallbackQuery = supabase
       .from("gmail_accounts")
       .select("id, email_address, status, health_status, user_id, last_synced_at")
-      .eq("workspace_id", workspaceId)
-      .order("created_at", { ascending: false });
+      .eq("workspace_id", workspaceId);
+
+    if (options?.projectId) {
+      fallbackQuery = fallbackQuery.eq("project_id", options.projectId);
+    }
+
+    result = await fallbackQuery.order("created_at", { ascending: false });
   }
 
   const { data, error } = result;
@@ -545,7 +558,7 @@ export async function sendReplyToThread(input: {
   };
 }
 
-export async function syncWorkspaceReplies(workspaceId: string) {
+export async function syncWorkspaceReplies(workspaceId: string, projectId?: string) {
   requireSupabaseConfiguration();
 
   if (!isGoogleConfigured) {
@@ -553,11 +566,17 @@ export async function syncWorkspaceReplies(workspaceId: string) {
   }
 
   const supabase = createAdminSupabaseClient();
-  const { data: rawMailboxes, error } = await supabase
+  let mailboxQuery = supabase
     .from("gmail_accounts")
-    .select("id, workspace_id, email_address, last_history_id")
+    .select("id, workspace_id, project_id, email_address, last_history_id")
     .eq("workspace_id", workspaceId)
     .eq("status", "active");
+
+  if (projectId) {
+    mailboxQuery = mailboxQuery.eq("project_id", projectId);
+  }
+
+  const { data: rawMailboxes, error } = await mailboxQuery;
 
   if (error) {
     throw error;
@@ -566,6 +585,7 @@ export async function syncWorkspaceReplies(workspaceId: string) {
   const mailboxes = (rawMailboxes ?? []) as Array<{
     id: string;
     workspace_id: string;
+    project_id: string;
     email_address: string;
     last_history_id?: string | null;
   }>;
@@ -589,7 +609,7 @@ export async function syncWorkspaceReplies(workspaceId: string) {
         )[0];
         const { data: existingThread } = await supabase
           .from("message_threads")
-          .select("id, campaign_contact_id")
+          .select("id, campaign_contact_id, project_id")
           .eq("gmail_thread_id", thread.gmailThreadId)
           .maybeSingle();
 
@@ -597,6 +617,8 @@ export async function syncWorkspaceReplies(workspaceId: string) {
           .from("message_threads")
           .upsert({
             workspace_id: mailbox.workspace_id,
+            project_id:
+              (existingThread as { project_id?: string | null } | null)?.project_id ?? mailbox.project_id,
             campaign_contact_id:
               (existingThread as { campaign_contact_id?: string | null } | null)?.campaign_contact_id ?? null,
             gmail_thread_id: thread.gmailThreadId,

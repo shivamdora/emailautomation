@@ -32,11 +32,12 @@ export function DeferredHeroVideo() {
   }, []);
 
   if (!shouldLoad) {
-    return <div aria-hidden="true" className="marketing-hero-video" />;
+    return <div aria-hidden="true" suppressHydrationWarning className="marketing-hero-video" />;
   }
 
   return (
     <video
+      suppressHydrationWarning
       className="marketing-hero-video"
       src="/media/outboundflow-hero.mp4"
       autoPlay

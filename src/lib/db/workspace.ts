@@ -2,9 +2,12 @@ import { cache } from "react";
 import { getSessionUser } from "@/lib/auth/session";
 import { buildWorkspaceShellLabel, getWorkspaceOwnerFirstName } from "@/lib/db/workspace-label";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { type ProjectSummary } from "@/lib/projects/shared";
 import { env, requireSupabaseConfiguration } from "@/lib/supabase/env";
 import { isMissingColumnError as isMissingSchemaColumnError } from "@/lib/utils/supabase-schema";
-import { ensureDefaultTemplatesForWorkspace, ensureDefaultTemplatesForWorkspaces } from "@/services/template-seed-service";
+import {
+  ensureWorkspaceProjects,
+} from "@/services/project-service";
 
 export type WorkspaceSummary = {
   id: string;
@@ -23,6 +26,9 @@ export type WorkspaceContext = {
   workspaceRole: "owner" | "admin" | "member";
   userFirstName: string | null;
   availableWorkspaces: WorkspaceSummary[];
+  activeProjectId: string;
+  activeProject: ProjectSummary;
+  availableProjects: ProjectSummary[];
 };
 
 function buildWorkspaceName(email?: string | null, fullName?: string | null) {
@@ -352,10 +358,6 @@ async function ensurePersonalWorkspace(user: {
   }
 
   await ensureWorkspaceUsageCounter(workspace.id);
-  await ensureDefaultTemplatesForWorkspace({
-    workspaceId: workspace.id,
-    userId: user.id,
-  });
 
   return workspace;
 }
@@ -418,10 +420,6 @@ async function ensureSharedWorkspaceMembership(userId: string) {
   }
 
   await ensureWorkspaceUsageCounter(sharedWorkspace.id);
-  await ensureDefaultTemplatesForWorkspace({
-    workspaceId: sharedWorkspace.id,
-    userId,
-  });
 
   return {
     id: sharedWorkspace.id,
@@ -635,7 +633,6 @@ export const getWorkspaceContext = cache(async (): Promise<WorkspaceContext> => 
     listUserWorkspaces(user.id),
     selectProfileWorkspaceState(user.id),
   ]);
-  await ensureDefaultTemplatesForWorkspaces(availableWorkspaces, user.id);
 
   const profile = rawProfileResult.data as
     | {
@@ -661,6 +658,11 @@ export const getWorkspaceContext = cache(async (): Promise<WorkspaceContext> => 
     workspaceName: activeWorkspace.name,
     email: user.email,
   });
+  const { activeProject, availableProjects } = await ensureWorkspaceProjects({
+    workspaceId: activeWorkspace.id,
+    workspaceName: activeWorkspace.name,
+    userId: user.id,
+  });
 
   return {
     userId: user.id,
@@ -675,5 +677,8 @@ export const getWorkspaceContext = cache(async (): Promise<WorkspaceContext> => 
     }),
     userFirstName,
     availableWorkspaces,
+    activeProjectId: activeProject.id,
+    activeProject,
+    availableProjects,
   };
 });

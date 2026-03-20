@@ -16,18 +16,25 @@ export default async function ProtectedAppLayout({
   try {
     workspace = await getWorkspaceContext();
   } catch (error) {
-    if (error instanceof Error && error.message === "No authenticated user session.") {
+    const message =
+      error instanceof Error
+        ? error.message
+        : error && typeof error === "object" && "message" in error && typeof error.message === "string"
+          ? error.message
+          : "Failed to load the protected app.";
+
+    if (message === "No authenticated user session.") {
       redirect("/sign-in");
     }
 
-    throw error;
+    throw new Error(message);
   }
 
   return (
     <AppShell
-      brandSubtitle={workspace.workspaceLabel}
-      activeWorkspaceId={workspace.workspaceId}
-      workspaces={workspace.availableWorkspaces}
+      activeProjectId={workspace.activeProjectId}
+      projects={workspace.availableProjects}
+      workspaceName={workspace.workspaceName}
     >
       {children}
     </AppShell>

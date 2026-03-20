@@ -26,6 +26,7 @@ export async function POST(request: Request) {
     const workspace = await getWorkspaceContext();
     const result = await importFromGoogleSheet({
       workspaceId: workspace.workspaceId,
+      projectId: workspace.activeProjectId,
       userId: workspace.userId,
       url: payload.data.url,
     });

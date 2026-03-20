@@ -19,6 +19,7 @@ export async function PATCH(
     const { contactId } = await context.params;
     const contact = await updateContact({
       workspaceId: workspace.workspaceId,
+      projectId: workspace.activeProjectId,
       contactId,
       email: payload.data.email,
       firstName: payload.data.firstName,
@@ -56,7 +57,7 @@ export async function DELETE(
     const workspace = await getWorkspaceContext();
     const { contactId } = await context.params;
 
-    await deleteContact(workspace.workspaceId, contactId);
+    await deleteContact(workspace.workspaceId, workspace.activeProjectId, contactId);
     await logActivity({
       workspaceId: workspace.workspaceId,
       actorUserId: workspace.userId,
