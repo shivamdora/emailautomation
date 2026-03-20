@@ -15,6 +15,7 @@ export async function POST(request: Request) {
     const workspace = await getWorkspaceContext();
     const contact = await createManualContact({
       workspaceId: workspace.workspaceId,
+      projectId: workspace.activeProjectId,
       userId: workspace.userId,
       email: payload.data.email,
       firstName: payload.data.firstName,

@@ -3,8 +3,37 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { requireSupabaseConfiguration } from "@/lib/supabase/env";
+import {
+  MEETING_FOLLOW_UP_SYSTEM_KEY,
+  SHELTER_SCORE_SYSTEM_KEY,
+  resolveCanonicalTemplateSystemKey,
+} from "@/lib/templates/default-templates";
 import { stripHtmlToText } from "@/lib/utils/html";
 import { isMissingColumnError } from "@/lib/utils/supabase-schema";
+
+function toTemplateSeedError(step: string, error: unknown) {
+  const message =
+    error && typeof error === "object" && "message" in error && typeof error.message === "string"
+      ? error.message
+      : `Unknown template seed error during ${step}.`;
+
+  if (
+    /column .*project_id/i.test(message) ||
+    /Could not find the table ['"]public\.templates['"]/i.test(message) ||
+    /relation ["']public\.templates["'] does not exist/i.test(message)
+  ) {
+    return new Error(
+      `Template seeding requires the latest Supabase migrations. Failed during ${step}: ${message}. ` +
+        "Apply the current migrations, including project-scoped templates, then reload the app.",
+    );
+  }
+
+  return error instanceof Error ? error : new Error(`Template seeding failed during ${step}: ${message}`);
+}
+
+function isOnConflictConstraintMismatch(message: string) {
+  return /no unique or exclusion constraint matching the ON CONFLICT specification/i.test(message);
+}
 
 type SeedTemplateDefinition = {
   systemKey: string;
@@ -21,7 +50,6 @@ type SeedTemplateDefinition = {
 const DEFAULT_TEMPLATE_SEED_VERSION = 2;
 const LEGACY_INTRO_SYSTEM_KEY = "system-intro-html-v1";
 const LEGACY_INTRO_TEMPLATE_NAME = "Intro Outreach";
-const SHELTER_SCORE_SYSTEM_KEY = "system-shelter-score-launch-html-v1";
 const SHELTER_SCORE_TEMPLATE_NAME = "Shelter Score Launch Template";
 
 function normalizeShelterScoreTemplateHtml(html: string) {
@@ -141,7 +169,7 @@ function buildDefaultTemplates(): SeedTemplateDefinition[] {
       bodyTemplate: shelterScoreText,
     },
     {
-      systemKey: "system-meeting-followup-html-v1",
+      systemKey: MEETING_FOLLOW_UP_SYSTEM_KEY,
       name: "Meeting Booking Follow-up",
       subjectTemplate: "Worth a quick 15-minute chat for {{company}}?",
       previewText: "A designed follow-up focused on turning quiet interest into a booked meeting.",
@@ -154,9 +182,10 @@ function buildDefaultTemplates(): SeedTemplateDefinition[] {
   ];
 }
 
-function createTemplateRows(workspaceId: string, userId: string) {
+function createTemplateRows(workspaceId: string, projectId: string, userId: string) {
   return buildDefaultTemplates().map((template) => ({
     workspace_id: workspaceId,
+    project_id: projectId,
     owner_user_id: userId,
     system_key: template.systemKey,
     is_system_template: true,
@@ -174,6 +203,7 @@ function createTemplateRows(workspaceId: string, userId: string) {
 
 async function backfillLegacyIntroTemplate(input: {
   workspaceId: string;
+  projectId: string;
   userId: string;
   shelterScoreTemplateRow: Record<string, unknown>;
 }) {
@@ -181,7 +211,8 @@ async function backfillLegacyIntroTemplate(input: {
   const result = await supabase
     .from("templates")
     .select("id, system_key, name, is_system_template")
-    .eq("workspace_id", input.workspaceId);
+    .eq("workspace_id", input.workspaceId)
+    .eq("project_id", input.projectId);
 
   if (
     result.error &&
@@ -194,7 +225,7 @@ async function backfillLegacyIntroTemplate(input: {
   }
 
   if (result.error) {
-    throw result.error;
+    throw toTemplateSeedError("backfilling legacy templates", result.error);
   }
 
   const templates = (result.data ?? []) as Array<{
@@ -222,10 +253,11 @@ async function backfillLegacyIntroTemplate(input: {
         .from("templates")
         .delete()
         .eq("workspace_id", input.workspaceId)
+        .eq("project_id", input.projectId)
         .in("id", duplicateLegacyIds);
 
       if (error) {
-        throw error;
+        throw toTemplateSeedError("removing duplicate legacy templates", error);
       }
     }
 
@@ -255,10 +287,11 @@ async function backfillLegacyIntroTemplate(input: {
       design_preset: input.shelterScoreTemplateRow.design_preset,
     })
     .eq("workspace_id", input.workspaceId)
+    .eq("project_id", input.projectId)
     .eq("id", legacyIntroTemplate.id);
 
   if (updateError) {
-    throw updateError;
+    throw toTemplateSeedError("updating the canonical legacy template", updateError);
   }
 
   const duplicateLegacyIds = legacyIntroTemplates
@@ -271,21 +304,240 @@ async function backfillLegacyIntroTemplate(input: {
       .from("templates")
       .delete()
       .eq("workspace_id", input.workspaceId)
+      .eq("project_id", input.projectId)
       .in("id", duplicateLegacyIds);
 
     if (error) {
-      throw error;
+      throw toTemplateSeedError("removing duplicate legacy templates", error);
     }
   }
 }
 
-export async function ensureDefaultTemplatesForWorkspace(input: {
+async function normalizeKnownDefaultTemplates(input: {
   workspaceId: string;
+  projectId: string;
+  userId: string;
+  templateRows: Array<Record<string, unknown>>;
+}) {
+  const supabase = createAdminSupabaseClient();
+  const result = await supabase
+    .from("templates")
+    .select("id, name, subject_template, system_key, is_system_template, created_at")
+    .eq("workspace_id", input.workspaceId)
+    .eq("project_id", input.projectId);
+
+  if (
+    result.error &&
+    (
+      isMissingColumnError(result.error.message, "templates", "system_key") ||
+      isMissingColumnError(result.error.message, "templates", "is_system_template")
+    )
+  ) {
+    return;
+  }
+
+  if (result.error) {
+    throw toTemplateSeedError("normalizing default templates", result.error);
+  }
+
+  const templates = (result.data ?? []) as Array<{
+    id: string;
+    name?: string | null;
+    subject_template?: string | null;
+    system_key?: string | null;
+    is_system_template?: boolean | null;
+    created_at?: string | null;
+  }>;
+
+  for (const templateRow of input.templateRows) {
+    const systemKey = String(templateRow.system_key ?? "");
+    if (!systemKey) {
+      continue;
+    }
+
+    const candidates = templates.filter(
+      (template) =>
+        resolveCanonicalTemplateSystemKey(template) === systemKey,
+    );
+
+    if (!candidates.length) {
+      continue;
+    }
+
+    const [keep, ...duplicates] = [...candidates].sort((left, right) => {
+      const leftKeyScore = left.system_key === systemKey ? 1 : 0;
+      const rightKeyScore = right.system_key === systemKey ? 1 : 0;
+
+      if (leftKeyScore !== rightKeyScore) {
+        return rightKeyScore - leftKeyScore;
+      }
+
+      const leftScore = left.is_system_template ? 1 : 0;
+      const rightScore = right.is_system_template ? 1 : 0;
+
+      if (leftScore !== rightScore) {
+        return rightScore - leftScore;
+      }
+
+      const leftTimestamp = left.created_at ? Date.parse(left.created_at) : 0;
+      const rightTimestamp = right.created_at ? Date.parse(right.created_at) : 0;
+      return rightTimestamp - leftTimestamp;
+    });
+
+    const { error: updateError } = await supabase
+      .from("templates")
+      .update({
+        owner_user_id: input.userId,
+        system_key: templateRow.system_key,
+        is_system_template: templateRow.is_system_template,
+        seed_version: templateRow.seed_version,
+        name: templateRow.name,
+        subject_template: templateRow.subject_template,
+        body_template: templateRow.body_template,
+        body_html_template: templateRow.body_html_template,
+        category: templateRow.category,
+        tags: templateRow.tags,
+        preview_text: templateRow.preview_text,
+        design_preset: templateRow.design_preset,
+      })
+      .eq("workspace_id", input.workspaceId)
+      .eq("project_id", input.projectId)
+      .eq("id", keep.id);
+
+    if (
+      updateError &&
+      (
+        isMissingColumnError(updateError.message, "templates", "body_html_template") ||
+        isMissingColumnError(updateError.message, "templates", "category")
+      )
+    ) {
+      const { error: fallbackUpdateError } = await supabase
+        .from("templates")
+        .update({
+          owner_user_id: input.userId,
+          system_key: templateRow.system_key,
+          is_system_template: templateRow.is_system_template,
+          seed_version: templateRow.seed_version,
+          name: templateRow.name,
+          subject_template: templateRow.subject_template,
+          body_template: templateRow.body_template,
+        })
+        .eq("workspace_id", input.workspaceId)
+        .eq("project_id", input.projectId)
+        .eq("id", keep.id);
+
+      if (fallbackUpdateError) {
+        throw toTemplateSeedError("normalizing fallback default templates", fallbackUpdateError);
+      }
+    } else if (updateError) {
+      throw toTemplateSeedError("normalizing default templates", updateError);
+    }
+
+    const duplicateIds = duplicates.map((template) => template.id).filter(Boolean);
+    if (!duplicateIds.length) {
+      continue;
+    }
+
+    const { error: deleteError } = await supabase
+      .from("templates")
+      .delete()
+      .eq("workspace_id", input.workspaceId)
+      .eq("project_id", input.projectId)
+      .in("id", duplicateIds);
+
+    if (deleteError) {
+      throw toTemplateSeedError("deleting duplicate default templates", deleteError);
+    }
+  }
+}
+
+async function persistDefaultTemplatesWithoutUpsert(input: {
+  workspaceId: string;
+  projectId: string;
+  userId: string;
+  templateRows: Array<Record<string, unknown>>;
+}) {
+  const supabase = createAdminSupabaseClient();
+  const templateKeys = input.templateRows.map((template) => String(template.system_key ?? "")).filter(Boolean);
+  const existing = await supabase
+    .from("templates")
+    .select("id, system_key")
+    .eq("workspace_id", input.workspaceId)
+    .eq("project_id", input.projectId)
+    .in("system_key", templateKeys);
+
+  if (existing.error) {
+    throw toTemplateSeedError("loading existing default templates", existing.error);
+  }
+
+  const existingBySystemKey = new Map(
+    ((existing.data ?? []) as Array<{ id: string; system_key?: string | null }>)
+      .filter((template) => template.system_key)
+      .map((template) => [String(template.system_key), template.id]),
+  );
+
+  for (const templateRow of input.templateRows) {
+    const existingId = existingBySystemKey.get(String(templateRow.system_key ?? ""));
+
+    if (existingId) {
+      const { error } = await supabase
+        .from("templates")
+        .update({
+          owner_user_id: input.userId,
+          system_key: templateRow.system_key,
+          is_system_template: templateRow.is_system_template,
+          seed_version: templateRow.seed_version,
+          name: templateRow.name,
+          subject_template: templateRow.subject_template,
+          body_template: templateRow.body_template,
+          body_html_template: templateRow.body_html_template,
+          category: templateRow.category,
+          tags: templateRow.tags,
+          preview_text: templateRow.preview_text,
+          design_preset: templateRow.design_preset,
+        })
+        .eq("workspace_id", input.workspaceId)
+        .eq("project_id", input.projectId)
+        .eq("id", existingId);
+
+      if (error) {
+        throw toTemplateSeedError("updating existing default templates", error);
+      }
+
+      continue;
+    }
+
+    const { error } = await supabase.from("templates").insert({
+      workspace_id: input.workspaceId,
+      project_id: input.projectId,
+      owner_user_id: input.userId,
+      system_key: templateRow.system_key,
+      is_system_template: templateRow.is_system_template,
+      seed_version: templateRow.seed_version,
+      name: templateRow.name,
+      subject_template: templateRow.subject_template,
+      body_template: templateRow.body_template,
+      body_html_template: templateRow.body_html_template,
+      category: templateRow.category,
+      tags: templateRow.tags,
+      preview_text: templateRow.preview_text,
+      design_preset: templateRow.design_preset,
+    });
+
+    if (error) {
+      throw toTemplateSeedError("inserting missing default templates", error);
+    }
+  }
+}
+
+export async function ensureDefaultTemplatesForProject(input: {
+  workspaceId: string;
+  projectId: string;
   userId: string;
 }) {
   requireSupabaseConfiguration();
   const supabase = createAdminSupabaseClient();
-  const templateRows = createTemplateRows(input.workspaceId, input.userId);
+  const templateRows = createTemplateRows(input.workspaceId, input.projectId, input.userId);
   const shelterScoreTemplateRow = templateRows.find(
     (template) => template.system_key === SHELTER_SCORE_SYSTEM_KEY,
   );
@@ -293,10 +545,18 @@ export async function ensureDefaultTemplatesForWorkspace(input: {
   if (shelterScoreTemplateRow) {
     await backfillLegacyIntroTemplate({
       workspaceId: input.workspaceId,
+      projectId: input.projectId,
       userId: input.userId,
       shelterScoreTemplateRow,
     });
   }
+
+  await normalizeKnownDefaultTemplates({
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    userId: input.userId,
+    templateRows,
+  });
 
   let result = await (
     supabase.from("templates") as unknown as {
@@ -306,7 +566,7 @@ export async function ensureDefaultTemplatesForWorkspace(input: {
       ) => Promise<{ error: { message: string } | null; data?: unknown }>;
     }
   ).upsert(templateRows, {
-    onConflict: "workspace_id,system_key",
+    onConflict: "project_id,system_key",
     ignoreDuplicates: false,
   });
 
@@ -322,10 +582,11 @@ export async function ensureDefaultTemplatesForWorkspace(input: {
       .from("templates")
       .select("name")
       .eq("workspace_id", input.workspaceId)
+      .eq("project_id", input.projectId)
       .in("name", templateRows.map((template) => String(template.name)));
 
     if (existing.error) {
-      throw existing.error;
+      throw toTemplateSeedError("checking existing default templates", existing.error);
     }
 
     const existingNames = new Set(
@@ -335,6 +596,7 @@ export async function ensureDefaultTemplatesForWorkspace(input: {
       .filter((template) => !existingNames.has(String(template.name)))
       .map((template) => ({
         workspace_id: input.workspaceId,
+        project_id: input.projectId,
         owner_user_id: input.userId,
         name: template.name,
         subject_template: template.subject_template,
@@ -352,20 +614,58 @@ export async function ensureDefaultTemplatesForWorkspace(input: {
         ) => Promise<{ error: { message: string } | null; data?: unknown }>;
       }
     ).insert(fallbackRows);
+  } else if (result.error && isOnConflictConstraintMismatch(result.error.message)) {
+    await persistDefaultTemplatesWithoutUpsert({
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      userId: input.userId,
+      templateRows,
+    });
+    return;
   }
 
   if (result.error) {
-    throw result.error;
+    throw toTemplateSeedError("upserting default templates", result.error);
   }
 }
 
-export async function ensureDefaultTemplatesForWorkspaces(workspaces: Array<{ id: string }>, userId: string) {
+export async function ensureDefaultTemplatesForProjects(input: {
+  workspaceId: string;
+  projects: Array<{ id: string }>;
+  userId: string;
+}) {
   await Promise.all(
-    workspaces.map((workspace) =>
-      ensureDefaultTemplatesForWorkspace({
-        workspaceId: workspace.id,
-        userId,
+    input.projects.map((project) =>
+      ensureDefaultTemplatesForProject({
+        workspaceId: input.workspaceId,
+        projectId: project.id,
+        userId: input.userId,
       }),
+    ),
+  );
+}
+
+export async function ensureDefaultTemplatesForWorkspace(input: {
+  workspaceId: string;
+  projectId: string;
+  userId: string;
+}) {
+  return ensureDefaultTemplatesForProject(input);
+}
+
+export async function ensureDefaultTemplatesForWorkspaces(
+  workspaces: Array<{ id: string; projects?: Array<{ id: string }> }>,
+  userId: string,
+) {
+  await Promise.all(
+    workspaces.flatMap((workspace) =>
+      (workspace.projects ?? []).map((project) =>
+        ensureDefaultTemplatesForProject({
+          workspaceId: workspace.id,
+          projectId: project.id,
+          userId,
+        }),
+      ),
     ),
   );
 }

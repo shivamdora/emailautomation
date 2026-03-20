@@ -7,7 +7,9 @@ import { listThreads } from "@/services/analytics-service";
 
 export default async function InboxPage() {
   const workspace = await getWorkspaceContext();
-  const threads = (await listThreads(workspace.workspaceId)) as Array<{
+  const threads = (await listThreads(workspace.workspaceId, {
+    projectId: workspace.activeProjectId,
+  })) as Array<{
     id: string;
     subject: string | null;
     snippet: string | null;

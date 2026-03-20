@@ -36,6 +36,7 @@ export async function POST(request: Request) {
     const sourceType = lowerFileName.endsWith(".csv") ? "csv" : "xlsx";
     const result = await processImportFile({
       workspaceId: workspace.workspaceId,
+      projectId: workspace.activeProjectId,
       userId: workspace.userId,
       fileName: file.name,
       fileBuffer: buffer,

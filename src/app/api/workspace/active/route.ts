@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
 import { setActiveWorkspace } from "@/lib/db/workspace";
 
+function redirectTo(url: URL, searchParams: Record<string, string>) {
+  for (const [key, value] of Object.entries(searchParams)) {
+    url.searchParams.set(key, value);
+  }
+
+  return NextResponse.redirect(url);
+}
+
 export async function POST(request: Request) {
   const user = await getSessionUser();
 
@@ -10,21 +18,44 @@ export async function POST(request: Request) {
   }
 
   const contentType = request.headers.get("content-type") ?? "";
+  const isJsonRequest = contentType.includes("application/json");
   const body =
-    contentType.includes("application/json")
+    isJsonRequest
       ? await request.json()
       : Object.fromEntries((await request.formData()).entries());
   const workspaceId = String(body.workspaceId ?? "");
 
   if (!workspaceId) {
-    return NextResponse.json({ error: "Workspace ID is required." }, { status: 400 });
+    if (isJsonRequest) {
+      return NextResponse.json({ error: "Workspace ID is required." }, { status: 400 });
+    }
+
+    return redirectTo(new URL("/settings", request.url), {
+      status: "error",
+      workspaceMessage: "Workspace ID is required.",
+    });
   }
 
   try {
     const result = await setActiveWorkspace(user.id, workspaceId);
-    return NextResponse.json(result);
+
+    if (isJsonRequest) {
+      return NextResponse.json(result);
+    }
+
+    return redirectTo(new URL("/settings", request.url), {
+      status: "workspace-switched",
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to switch workspace.";
-    return NextResponse.json({ error: message }, { status: /denied/i.test(message) ? 403 : 500 });
+
+    if (isJsonRequest) {
+      return NextResponse.json({ error: message }, { status: /denied/i.test(message) ? 403 : 500 });
+    }
+
+    return redirectTo(new URL("/settings", request.url), {
+      status: "error",
+      workspaceMessage: message,
+    });
   }
 }

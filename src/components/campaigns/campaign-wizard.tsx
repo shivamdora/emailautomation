@@ -6,8 +6,12 @@ import type { Control, UseFormRegister, UseFormSetValue } from "react-hook-form"
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import type { z } from "zod";
 import { productContent } from "@/content/product";
+import {
+  buildCampaignWizardInitialValues,
+  buildDefaultWorkflowStep,
+  type CampaignFormValues,
+} from "@/lib/campaigns/wizard-defaults";
 import type { ContactRecord } from "@/lib/types/contact";
 import { previewRenderedTemplate } from "@/lib/utils/template";
 import { campaignBuilderSchema } from "@/lib/zod/schemas";
@@ -21,7 +25,6 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
-type CampaignFormValues = z.input<typeof campaignBuilderSchema>;
 type WorkflowStepPath = `workflowDefinition.steps.${number}`;
 
 type WizardProps = {
@@ -37,6 +40,7 @@ type WizardProps = {
   mode?: "create" | "edit";
   campaignId?: string;
   initialValues?: CampaignFormValues;
+  initialSelectedTemplateId?: string;
 };
 
 type StepEditorProps = {
@@ -56,6 +60,7 @@ type StepEditorProps = {
   setValue: UseFormSetValue<CampaignFormValues>;
   templates: WizardProps["templates"];
   onRemove: () => void;
+  initialSelectedTemplateId?: string;
 };
 
 function getTemplateSnippet(template: {
@@ -69,26 +74,6 @@ function getTemplateSnippet(template: {
   return template.body_template.slice(0, 120) || productContent.shared.noBodyLabel;
 }
 
-function buildDefaultWorkflowStep(index: number): CampaignFormValues["workflowDefinition"]["steps"][number] {
-  const stepNumber = index + 1;
-  const isFinal = stepNumber >= 2;
-
-  return {
-    name: stepNumber === 1 ? "Primary email" : `Step ${stepNumber}`,
-    waitDays: stepNumber === 1 ? 2 : 0,
-    branchCondition: stepNumber === 1 ? "opened" : "time",
-    onMatch: isFinal ? "exit_sequence" : "next_step",
-    onNoMatch: stepNumber === 1 ? "next_step" : "exit_sequence",
-    subject: stepNumber === 1 ? "Quick idea for {{company}}" : "Following up on my note",
-    mode: "text",
-    body:
-      stepNumber === 1
-        ? "Hi {{first_name}},\n\nThought this might be relevant for {{company}}.\n\nBest,\nJay"
-        : "Hi {{first_name}},\n\nBumping this once in case it got buried.\n\nBest,\nJay",
-    bodyHtml: "",
-  };
-}
-
 function CampaignStepEditor({
   index,
   stepCount,
@@ -99,8 +84,9 @@ function CampaignStepEditor({
   setValue,
   templates,
   onRemove,
+  initialSelectedTemplateId,
 }: StepEditorProps) {
-  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [selectedTemplateId, setSelectedTemplateId] = useState(initialSelectedTemplateId ?? "");
   const stepCopy = productContent.campaigns.wizard.stepEditor;
   const mode = useWatch({ control, name: `${namePrefix}.mode` as never }) as unknown as
     | "text"
@@ -415,6 +401,7 @@ export function CampaignWizard({
   mode = "create",
   campaignId,
   initialValues,
+  initialSelectedTemplateId,
 }: WizardProps) {
   const wizardCopy = productContent.campaigns.wizard;
   const hasMailbox = gmailAccounts.length > 0;
@@ -424,19 +411,13 @@ export function CampaignWizard({
   const form = useForm<CampaignFormValues>({
     resolver: zodResolver(campaignBuilderSchema),
     defaultValues:
-      initialValues ?? {
-        campaignName: "",
-        gmailAccountId: gmailAccounts[0]?.id ?? "",
-        contactListId: "",
-        targetContactIds: contacts.slice(0, 3).map((contact) => contact.id),
-        timezone: "Asia/Calcutta",
-        sendWindowStart: "09:00",
-        sendWindowEnd: "17:00",
-        dailySendLimit: 25,
-        workflowDefinition: {
-          steps: [buildDefaultWorkflowStep(0), buildDefaultWorkflowStep(1)],
-        },
-      },
+      initialValues ??
+      buildCampaignWizardInitialValues({
+        gmailAccounts,
+        contacts,
+        templates,
+        selectedTemplateId: initialSelectedTemplateId,
+      }),
   });
   const stepFields = useFieldArray({
     control: form.control,
@@ -795,6 +776,7 @@ export function CampaignWizard({
                 setValue={form.setValue}
                 templates={templates}
                 onRemove={() => stepFields.remove(index)}
+                initialSelectedTemplateId={index === 0 ? initialSelectedTemplateId : undefined}
               />
             ))}
           </section>

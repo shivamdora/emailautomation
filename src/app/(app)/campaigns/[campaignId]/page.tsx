@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { productContent } from "@/content/product";
+import { getWorkspaceContext } from "@/lib/db/workspace";
 import { buildWorkflowDefinitionFromStoredSteps, normalizeWorkflowDefinition } from "@/lib/workflows/definition";
 import { getCampaignById } from "@/services/campaign-service";
 import Link from "next/link";
@@ -27,7 +28,12 @@ export default async function CampaignDetailPage({
   params: Promise<{ campaignId: string }>;
 }) {
   const { campaignId } = await params;
-  const campaign = (await getCampaignById(campaignId)) as {
+  const workspace = await getWorkspaceContext();
+  const campaign = (await getCampaignById(
+    campaignId,
+    workspace.workspaceId,
+    workspace.activeProjectId,
+  )) as {
     name: string;
     status: string;
     daily_send_limit: number;

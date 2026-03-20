@@ -5,7 +5,7 @@ import { syncWorkspaceReplies } from "@/services/gmail-service";
 export async function POST() {
   try {
     const workspace = await getWorkspaceContext();
-    const result = await syncWorkspaceReplies(workspace.workspaceId);
+    const result = await syncWorkspaceReplies(workspace.workspaceId, workspace.activeProjectId);
 
     return NextResponse.json(result);
   } catch (error) {

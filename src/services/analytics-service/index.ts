@@ -2,24 +2,53 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { requireSupabaseConfiguration } from "@/lib/supabase/env";
 import { isMissingColumnResult } from "@/lib/utils/supabase-schema";
 
-export async function getDashboardMetrics(workspaceId: string) {
+export async function getDashboardMetrics(workspaceId: string, options?: { projectId?: string }) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
-  const workspaceCampaignContacts = () =>
-    supabase
+  const workspaceCampaignContacts = () => {
+    let query = supabase
       .from("campaign_contacts")
-      .select("id, campaign:campaigns!inner(workspace_id)", { count: "exact", head: true })
+      .select("id, campaign:campaigns!inner(workspace_id, project_id)", { count: "exact", head: true })
       .eq("campaign.workspace_id", workspaceId);
-  const workspaceOutboundMessages = () =>
-    supabase
+
+    if (options?.projectId) {
+      query = query.eq("campaign.project_id", options.projectId);
+    }
+
+    return query;
+  };
+  const workspaceOutboundMessages = () => {
+    let query = supabase
       .from("outbound_messages")
       .select(
-        "id, campaign_contact:campaign_contacts!inner(campaign:campaigns!inner(workspace_id))",
+        "id, campaign_contact:campaign_contacts!inner(campaign:campaigns!inner(workspace_id, project_id))",
         { count: "exact", head: true },
       )
       .eq("campaign_contact.campaign.workspace_id", workspaceId)
       .eq("status", "sent");
+
+    if (options?.projectId) {
+      query = query.eq("campaign_contact.campaign.project_id", options.projectId);
+    }
+
+    return query;
+  };
+  const contactsQuery = supabase
+    .from("contacts")
+    .select("*", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId);
+  const unsubscribedQuery = supabase
+    .from("contacts")
+    .select("*", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
+    .not("unsubscribed_at", "is", null);
+
+  if (options?.projectId) {
+    contactsQuery.eq("project_id", options.projectId);
+    unsubscribedQuery.eq("project_id", options.projectId);
+  }
+
   const [
     { count: totalLeads },
     { count: queued },
@@ -29,16 +58,12 @@ export async function getDashboardMetrics(workspaceId: string) {
     { count: unsubscribed },
     { count: failed },
   ] = await Promise.all([
-    supabase.from("contacts").select("*", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+    contactsQuery,
     workspaceCampaignContacts().eq("status", "queued"),
     workspaceOutboundMessages().eq("step_number", 1),
     workspaceOutboundMessages().eq("step_number", 2),
     workspaceCampaignContacts().eq("status", "replied"),
-    supabase
-      .from("contacts")
-      .select("*", { count: "exact", head: true })
-      .eq("workspace_id", workspaceId)
-      .not("unsubscribed_at", "is", null),
+    unsubscribedQuery,
     workspaceCampaignContacts().eq("status", "failed"),
   ]);
 
@@ -57,14 +82,20 @@ export async function getDashboardMetrics(workspaceId: string) {
   };
 }
 
-export async function getReplyRateByCampaign(workspaceId: string) {
+export async function getReplyRateByCampaign(workspaceId: string, options?: { projectId?: string }) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("campaigns")
     .select("id, name, campaign_contacts(status, outbound_messages(step_number, status))")
     .eq("workspace_id", workspaceId);
+
+  if (options?.projectId) {
+    query = query.eq("project_id", options.projectId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw error;
@@ -94,28 +125,36 @@ export async function getReplyRateByCampaign(workspaceId: string) {
   });
 }
 
-export async function listThreads(workspaceId: string) {
+export async function listThreads(workspaceId: string, options?: { projectId?: string }) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
-  let result = await supabase
+  let baseQuery = supabase
     .from("message_threads")
     .select(
       "id, gmail_thread_id, subject, snippet, latest_message_at, campaign_contact_id, campaign_contact:campaign_contacts(status, reply_disposition), thread_messages(id, direction, from_email, to_emails, subject, body_text, body_html, sent_at)",
     )
-    .eq("workspace_id", workspaceId)
-    .order("latest_message_at", { ascending: false })
-    .limit(20);
+    .eq("workspace_id", workspaceId);
+
+  if (options?.projectId) {
+    baseQuery = baseQuery.eq("project_id", options.projectId);
+  }
+
+  let result = await baseQuery.order("latest_message_at", { ascending: false }).limit(20);
 
   if (isMissingColumnResult(result, "campaign_contacts", "reply_disposition")) {
-    result = await supabase
+    let fallbackQuery = supabase
       .from("message_threads")
       .select(
         "id, gmail_thread_id, subject, snippet, latest_message_at, campaign_contact_id, campaign_contact:campaign_contacts(status), thread_messages(id, direction, from_email, to_emails, subject, body_text, body_html, sent_at)",
       )
-      .eq("workspace_id", workspaceId)
-      .order("latest_message_at", { ascending: false })
-      .limit(20);
+      .eq("workspace_id", workspaceId);
+
+    if (options?.projectId) {
+      fallbackQuery = fallbackQuery.eq("project_id", options.projectId);
+    }
+
+    result = await fallbackQuery.order("latest_message_at", { ascending: false }).limit(20);
   }
 
   const { data, error } = result;

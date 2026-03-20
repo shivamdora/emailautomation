@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getWorkspaceContext } from "@/lib/db/workspace";
 import { pauseCampaignSchema } from "@/lib/zod/schemas";
 import { pauseCampaign } from "@/services/campaign-service";
 
@@ -14,7 +15,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: payload.error.flatten() }, { status: 400 });
   }
 
-  const result = await pauseCampaign(payload.data.campaignId, payload.data.status);
+  const workspace = await getWorkspaceContext();
+  const result = await pauseCampaign(
+    payload.data.campaignId,
+    workspace.workspaceId,
+    workspace.activeProjectId,
+    payload.data.status,
+  );
 
   if (contentType.includes("application/json")) {
     return NextResponse.json(result);

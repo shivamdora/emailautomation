@@ -23,6 +23,7 @@ export async function GET(request: Request) {
   const state = await new SignJWT({
     desktopReturnUrl,
     workspaceId: workspace.workspaceId,
+    projectId: workspace.activeProjectId,
     userId: workspace.userId,
   })
     .setProtectedHeader({ alg: "HS256" })

@@ -15,10 +15,13 @@ export default async function EditCampaignPage({
   const { campaignId } = await params;
   const workspace = await getWorkspaceContext();
   const [campaign, rawGmailAccounts, contacts, rawTemplates] = await Promise.all([
-    getCampaignForEditing(campaignId, workspace.workspaceId),
-    getWorkspaceGmailAccounts(workspace.workspaceId, { onlyApproved: true }),
-    listContacts(workspace.workspaceId),
-    listTemplates(workspace.workspaceId),
+    getCampaignForEditing(campaignId, workspace.workspaceId, workspace.activeProjectId),
+    getWorkspaceGmailAccounts(workspace.workspaceId, {
+      onlyApproved: true,
+      projectId: workspace.activeProjectId,
+    }),
+    listContacts(workspace.workspaceId, workspace.activeProjectId),
+    listTemplates(workspace.workspaceId, workspace.activeProjectId),
   ]);
   const gmailAccounts = rawGmailAccounts as Array<{ id: string; email_address: string }>;
   const templates = rawTemplates as Array<{

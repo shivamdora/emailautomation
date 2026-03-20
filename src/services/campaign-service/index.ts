@@ -18,6 +18,7 @@ import {
   type WorkflowStepInput,
 } from "@/lib/workflows/definition";
 import { isWithinSendWindow } from "@/lib/utils/time";
+import { dedupeTemplates, type TemplateListItem } from "@/lib/templates/gallery";
 import { assertWorkspaceCanCreateCampaign, refreshWorkspaceUsageCounters } from "@/services/entitlement-service";
 import { getMailboxAccessTokenForAccount, sendWithMailboxProvider } from "@/services/gmail-service";
 import { instrumentHtmlForTracking, recordMessageEvent } from "@/services/telemetry-service";
@@ -61,6 +62,7 @@ type ListedTemplateRecord = {
   tags?: string[] | null;
   design_preset?: string | null;
   is_system_template?: boolean | null;
+  system_key?: string | null;
   created_at: string;
 };
 
@@ -110,6 +112,7 @@ function hydrateListedTemplates(templates: ListedTemplateRecord[]) {
       tags: template.tags ?? seedTemplate?.tags ?? [],
       design_preset: template.design_preset ?? seedTemplate?.designPreset ?? null,
       is_system_template: Boolean(template.is_system_template ?? seedTemplate),
+      system_key: template.system_key ?? null,
     };
   });
 
@@ -330,7 +333,7 @@ async function selectCampaignWithSteps(campaignId: string) {
   let result = await supabase
     .from("campaigns")
     .select(
-      "id, name, status, daily_send_limit, timezone, send_window_start, send_window_end, gmail_account_id, workflow_definition_jsonb, campaign_steps(id, step_number, step_type, subject_template, body_template, body_html_template, wait_days), campaign_contacts(id, status, current_step, next_due_at, contact_id, contact:contacts(email, first_name, company))",
+      "id, workspace_id, project_id, name, status, daily_send_limit, timezone, send_window_start, send_window_end, gmail_account_id, workflow_definition_jsonb, campaign_steps(id, step_number, step_type, subject_template, body_template, body_html_template, wait_days), campaign_contacts(id, status, current_step, next_due_at, contact_id, contact:contacts(email, first_name, company))",
     )
     .eq("id", campaignId)
     .single();
@@ -339,7 +342,7 @@ async function selectCampaignWithSteps(campaignId: string) {
     result = await supabase
       .from("campaigns")
       .select(
-        "id, name, status, daily_send_limit, timezone, send_window_start, send_window_end, gmail_account_id, campaign_steps(id, step_number, step_type, subject_template, body_template, wait_days), campaign_contacts(id, status, current_step, next_due_at, contact_id, contact:contacts(email, first_name, company))",
+        "id, workspace_id, project_id, name, status, daily_send_limit, timezone, send_window_start, send_window_end, gmail_account_id, campaign_steps(id, step_number, step_type, subject_template, body_template, wait_days), campaign_contacts(id, status, current_step, next_due_at, contact_id, contact:contacts(email, first_name, company))",
       )
       .eq("id", campaignId)
       .single();
@@ -352,25 +355,27 @@ async function selectCampaignWithSteps(campaignId: string) {
   return result.data;
 }
 
-async function selectCampaignForEditing(campaignId: string, workspaceId: string) {
+async function selectCampaignForEditing(campaignId: string, workspaceId: string, projectId: string) {
   const supabase = createAdminSupabaseClient();
   let result = await supabase
     .from("campaigns")
     .select(
-      "id, workspace_id, name, status, gmail_account_id, daily_send_limit, timezone, send_window_start, send_window_end, workflow_definition_jsonb, campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days), campaign_contacts(contact_id, status, current_step)",
+      "id, workspace_id, project_id, name, status, gmail_account_id, daily_send_limit, timezone, send_window_start, send_window_end, workflow_definition_jsonb, campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days), campaign_contacts(contact_id, status, current_step)",
     )
     .eq("id", campaignId)
     .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId)
     .single();
 
   if (isCampaignSchemaResult(result)) {
     result = await supabase
       .from("campaigns")
       .select(
-        "id, workspace_id, name, status, gmail_account_id, daily_send_limit, timezone, send_window_start, send_window_end, campaign_steps(step_number, step_type, subject_template, body_template, wait_days), campaign_contacts(contact_id, status, current_step)",
+        "id, workspace_id, project_id, name, status, gmail_account_id, daily_send_limit, timezone, send_window_start, send_window_end, campaign_steps(step_number, step_type, subject_template, body_template, wait_days), campaign_contacts(contact_id, status, current_step)",
       )
       .eq("id", campaignId)
       .eq("workspace_id", workspaceId)
+      .eq("project_id", projectId)
       .single();
   }
 
@@ -381,14 +386,15 @@ async function selectCampaignForEditing(campaignId: string, workspaceId: string)
   return result.data;
 }
 
-export async function listTemplates(workspaceId: string) {
+export async function listTemplates(workspaceId: string, projectId: string) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
   let result = await supabase
     .from("templates")
-    .select("id, name, subject_template, body_template, body_html_template, preview_text, category, tags, design_preset, is_system_template, created_at")
+    .select("id, name, subject_template, body_template, body_html_template, preview_text, category, tags, design_preset, is_system_template, system_key, created_at")
     .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId)
     .order("created_at", { ascending: false });
 
   if (isCampaignSchemaResult(result)) {
@@ -396,6 +402,7 @@ export async function listTemplates(workspaceId: string) {
       .from("templates")
       .select("id, name, subject_template, body_template, created_at")
       .eq("workspace_id", workspaceId)
+      .eq("project_id", projectId)
       .order("created_at", { ascending: false });
   }
 
@@ -403,11 +410,14 @@ export async function listTemplates(workspaceId: string) {
     throw result.error;
   }
 
-  return hydrateListedTemplates((result.data ?? []) as ListedTemplateRecord[]);
+  return dedupeTemplates(
+    hydrateListedTemplates((result.data ?? []) as ListedTemplateRecord[]) as TemplateListItem[],
+  );
 }
 
 export async function saveTemplate(input: {
   workspaceId: string;
+  projectId: string;
   userId: string;
   name: string;
   subjectTemplate: string;
@@ -427,6 +437,7 @@ export async function saveTemplate(input: {
   });
   const templatePayload = {
     workspace_id: input.workspaceId,
+    project_id: input.projectId,
     owner_user_id: input.userId,
     name: input.name,
     subject_template: normalized.subject_template,
@@ -452,6 +463,7 @@ export async function saveTemplate(input: {
         .from("templates")
         .insert({
           workspace_id: input.workspaceId,
+          project_id: input.projectId,
           owner_user_id: input.userId,
           name: input.name,
           subject_template: normalized.subject_template,
@@ -472,7 +484,7 @@ export async function saveTemplate(input: {
   return data as { id: string };
 }
 
-export async function listCampaigns(workspaceId: string) {
+export async function listCampaigns(workspaceId: string, projectId: string) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
@@ -480,6 +492,7 @@ export async function listCampaigns(workspaceId: string) {
     .from("campaigns")
     .select("id, name, status, daily_send_limit, timezone, created_at")
     .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -496,12 +509,22 @@ export async function listCampaigns(workspaceId: string) {
   }>;
 }
 
-export async function getCampaignById(campaignId: string) {
+export async function getCampaignById(campaignId: string, workspaceId?: string, projectId?: string) {
   requireSupabaseConfiguration();
   const data = await selectCampaignWithSteps(campaignId);
+  const campaign = data as { workspace_id?: string | null; project_id?: string | null } | null;
+
+  if (
+    (workspaceId && campaign?.workspace_id !== workspaceId) ||
+    (projectId && campaign?.project_id !== projectId)
+  ) {
+    throw new Error("Campaign not found.");
+  }
 
   return data as {
     id: string;
+    workspace_id: string;
+    project_id: string;
     name: string;
     status: string;
     daily_send_limit: number;
@@ -522,13 +545,14 @@ export async function getCampaignById(campaignId: string) {
   };
 }
 
-export async function getCampaignForEditing(campaignId: string, workspaceId: string) {
+export async function getCampaignForEditing(campaignId: string, workspaceId: string, projectId: string) {
   requireSupabaseConfiguration();
-  const data = await selectCampaignForEditing(campaignId, workspaceId);
+  const data = await selectCampaignForEditing(campaignId, workspaceId, projectId);
 
   return data as {
     id: string;
     workspace_id: string;
+    project_id: string;
     name: string;
     status: string;
     gmail_account_id: string;
@@ -561,6 +585,7 @@ type DueCampaignContact = {
   campaign?: {
     id: string;
     workspace_id: string;
+    project_id: string;
     name: string;
     status: string;
     gmail_account_id: string;
@@ -708,6 +733,7 @@ async function processCampaignContact(item: DueCampaignContact, options?: { igno
 
     await supabase.from("message_threads").upsert({
       workspace_id: campaign.workspace_id,
+      project_id: campaign.project_id,
       campaign_contact_id: item.id,
       gmail_thread_id: sendResult.threadId || sendResult.messageId || randomUUID(),
       subject: rendered.subject,
@@ -762,6 +788,7 @@ async function processCampaignContact(item: DueCampaignContact, options?: { igno
 
 export async function createCampaign(input: {
   workspaceId: string;
+  projectId: string;
   userId: string;
   campaignName: string;
   gmailAccountId: string;
@@ -781,6 +808,7 @@ export async function createCampaign(input: {
     .from("campaigns")
     .insert({
       workspace_id: input.workspaceId,
+      project_id: input.projectId,
       owner_user_id: input.userId,
       name: input.campaignName,
       status: "active",
@@ -800,6 +828,7 @@ export async function createCampaign(input: {
       .from("campaigns")
       .insert({
         workspace_id: input.workspaceId,
+        project_id: input.projectId,
         owner_user_id: input.userId,
         name: input.campaignName,
         status: "active",
@@ -846,6 +875,7 @@ export async function createCampaign(input: {
 
 export async function updateCampaign(input: {
   workspaceId: string;
+  projectId: string;
   campaignId: string;
   campaignName: string;
   gmailAccountId: string;
@@ -865,6 +895,7 @@ export async function updateCampaign(input: {
     .select("id")
     .eq("id", input.campaignId)
     .eq("workspace_id", input.workspaceId)
+    .eq("project_id", input.projectId)
     .maybeSingle();
 
   if (campaignError) {
@@ -887,7 +918,8 @@ export async function updateCampaign(input: {
       workflow_definition_jsonb: workflowDefinition,
     })
     .eq("id", input.campaignId)
-    .eq("workspace_id", input.workspaceId);
+    .eq("workspace_id", input.workspaceId)
+    .eq("project_id", input.projectId);
 
   if (updateError && !isCampaignSchemaCacheError(updateError)) {
     throw updateError;
@@ -905,7 +937,8 @@ export async function updateCampaign(input: {
         timezone: input.timezone,
       })
       .eq("id", input.campaignId)
-      .eq("workspace_id", input.workspaceId);
+      .eq("workspace_id", input.workspaceId)
+      .eq("project_id", input.projectId);
 
     if (fallbackUpdateError) {
       throw fallbackUpdateError;
@@ -988,7 +1021,7 @@ export async function updateCampaign(input: {
   return { id: input.campaignId, updated: true };
 }
 
-export async function deleteCampaign(campaignId: string, workspaceId: string) {
+export async function deleteCampaign(campaignId: string, workspaceId: string, projectId: string) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
@@ -996,7 +1029,8 @@ export async function deleteCampaign(campaignId: string, workspaceId: string) {
     .from("campaigns")
     .delete()
     .eq("id", campaignId)
-    .eq("workspace_id", workspaceId);
+    .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId);
 
   if (error) {
     throw error;
@@ -1007,16 +1041,28 @@ export async function deleteCampaign(campaignId: string, workspaceId: string) {
   return { campaignId, deleted: true };
 }
 
-export async function pauseCampaign(campaignId: string, status: "paused" | "active") {
+export async function pauseCampaign(
+  campaignId: string,
+  workspaceId: string,
+  projectId: string,
+  status: "paused" | "active",
+) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
-  await supabase.from("campaigns").update({ status }).eq("id", campaignId);
+  await supabase
+    .from("campaigns")
+    .update({ status })
+    .eq("id", campaignId)
+    .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId);
 
   const { data: rawCampaign } = await supabase
     .from("campaigns")
     .select("workspace_id")
     .eq("id", campaignId)
+    .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId)
     .maybeSingle();
   const campaign = rawCampaign as { workspace_id?: string | null } | null;
 
@@ -1043,7 +1089,7 @@ export async function markFailedContactForResend(campaignContactId: string) {
   return { campaignContactId, status: "queued" };
 }
 
-export async function sendCampaignNow(campaignId: string, workspaceId: string) {
+export async function sendCampaignNow(campaignId: string, workspaceId: string, projectId: string) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
@@ -1052,6 +1098,7 @@ export async function sendCampaignNow(campaignId: string, workspaceId: string) {
     .select("id")
     .eq("id", campaignId)
     .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId)
     .maybeSingle();
 
   if (campaignError) {
@@ -1080,6 +1127,7 @@ export async function sendCampaignNow(campaignId: string, workspaceId: string) {
       campaign:campaigns(
         id,
         workspace_id,
+        project_id,
         name,
         status,
         gmail_account_id,
@@ -1115,6 +1163,7 @@ export async function sendCampaignNow(campaignId: string, workspaceId: string) {
         campaign:campaigns(
           id,
           workspace_id,
+          project_id,
           name,
           status,
           gmail_account_id,
