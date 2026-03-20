@@ -8,6 +8,28 @@
 - Edge Functions
 - Cron
 
+## Google sign-in via Supabase
+
+App login with the "Continue with Google" button uses Supabase Auth, not the custom Gmail mailbox OAuth route.
+
+The browser flow in this repo is:
+
+1. User clicks Google sign-in in the app.
+2. Supabase starts the OAuth flow.
+3. Google redirects back to the Supabase callback.
+4. Supabase sends the browser back to `/auth/callback` on the app origin.
+
+That means the Google Cloud OAuth client configured in Supabase must include this authorized redirect URI:
+
+- `https://dbsmydauvhbnlqgezscl.supabase.co/auth/v1/callback`
+
+And Supabase Auth itself must allow both app callback URLs:
+
+- `http://localhost:3000/auth/callback`
+- `https://outbound-flow.vercel.app/auth/callback`
+
+If Google shows `Error 400: redirect_uri_mismatch` during app sign-in, the problem is almost always the Google client configured in Supabase, not the custom Gmail env vars.
+
 ## Apply schema
 
 Run the migration in:

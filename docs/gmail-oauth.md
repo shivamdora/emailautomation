@@ -1,5 +1,7 @@
 # Gmail OAuth Setup
 
+This document is for connecting a Gmail mailbox inside the product after sign-in. It is separate from Google app login via Supabase Auth.
+
 ## Google Cloud setup
 
 1. Create a Google Cloud project.
@@ -13,6 +15,13 @@ Create a Web application OAuth client and set:
 
 - Authorized redirect URI: `http://localhost:3000/api/gmail/callback`
 - Production redirect URI: `https://your-app-domain/api/gmail/callback`
+
+For this repo's current production host that means:
+
+- `https://outbound-flow.vercel.app/api/gmail/callback`
+
+Only the callback route belongs in Google Cloud authorized redirect URIs for this flow.
+Do not add app sign-in routes such as `/auth/callback`, and do not add non-callback paths such as `/api/auth/gmail/start` or `/api/auth/gmail/callback`.
 
 ## Required env vars
 

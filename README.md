@@ -99,6 +99,15 @@ Release notes: [docs/vercel-desktop-release.md](/Users/admin/Desktop/AI/outbound
 
 Detailed notes: [docs/supabase-setup.md](/D:/Jayant/AI_Jayant/Cold%20Email/docs/supabase-setup.md)
 
+Google sign-in for app login runs through Supabase Auth. In Google Cloud, the OAuth client used by Supabase must authorize only the Supabase callback:
+
+- `https://dbsmydauvhbnlqgezscl.supabase.co/auth/v1/callback`
+
+Then add your app URLs in Supabase Auth redirect settings:
+
+- `http://localhost:3000/auth/callback`
+- `https://outbound-flow.vercel.app/auth/callback`
+
 ## Gmail OAuth setup
 
 Detailed notes: [docs/gmail-oauth.md](/D:/Jayant/AI_Jayant/Cold%20Email/docs/gmail-oauth.md)
