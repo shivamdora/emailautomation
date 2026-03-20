@@ -73,13 +73,16 @@ async function updateCampaignContactReplyState(
   }
 }
 
-export function createGoogleConnectUrl(state: string, options?: { redirectUri?: string }) {
+export function createGoogleConnectUrl(
+  state: string,
+  options?: { redirectUri?: string; scopes?: string[] },
+) {
   requireGoogleConfiguration();
   const auth = createOAuthClientWithRedirectUri(options?.redirectUri);
   return auth.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    scope: GMAIL_SCOPES,
+    scope: options?.scopes?.length ? options.scopes : GMAIL_SCOPES,
     state,
     include_granted_scopes: true,
   });

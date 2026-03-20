@@ -5,6 +5,12 @@ export const config = {
   cronVerifySecret: Deno.env.get("SUPABASE_CRON_VERIFY_SECRET") ?? "",
   googleClientId: Deno.env.get("GOOGLE_CLIENT_ID") ?? "",
   googleClientSecret: Deno.env.get("GOOGLE_CLIENT_SECRET") ?? "",
+  hubspotClientId: Deno.env.get("HUBSPOT_CLIENT_ID") ?? "",
+  hubspotClientSecret: Deno.env.get("HUBSPOT_CLIENT_SECRET") ?? "",
+  salesforceClientId: Deno.env.get("SALESFORCE_CLIENT_ID") ?? "",
+  salesforceClientSecret: Deno.env.get("SALESFORCE_CLIENT_SECRET") ?? "",
+  salesforceAuthBaseUrl: Deno.env.get("SALESFORCE_AUTH_BASE_URL") ?? "https://login.salesforce.com",
   followUpDelayDays: Number(Deno.env.get("FOLLOW_UP_DELAY_DAYS") ?? "2"),
   defaultPerMinuteThrottle: Number(Deno.env.get("DEFAULT_PER_MINUTE_THROTTLE") ?? "10"),
+  seedMonitorIntervalMinutes: Number(Deno.env.get("SEED_MONITOR_INTERVAL_MINUTES") ?? "30"),
 };

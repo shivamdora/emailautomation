@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { createSeedInboxRecord, updateSeedInboxRecord } from "@/services/seed-monitor-service";
 
 export async function POST(request: Request) {
   const workspace = await getWorkspaceContext();
@@ -10,22 +10,23 @@ export async function POST(request: Request) {
   }
 
   const formData = await request.formData();
+  const action = String(formData.get("action") ?? "save").trim();
   const inboxId = String(formData.get("seedInboxId") ?? "").trim();
   const provider = String(formData.get("provider") ?? "").trim();
   const emailAddress = String(formData.get("emailAddress") ?? "").trim().toLowerCase();
   const status = String(formData.get("status") ?? "active").trim() || "active";
-  const supabase = createAdminSupabaseClient();
+  const monitoringEnabled = String(formData.get("monitoringEnabled") ?? "").trim();
 
   if (inboxId) {
-    const { error } = await supabase
-      .from("seed_inboxes")
-      .update({ status })
-      .eq("workspace_id", workspace.workspaceId)
-      .eq("id", inboxId);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    await updateSeedInboxRecord({
+      workspaceId: workspace.workspaceId,
+      seedInboxId: inboxId,
+      status,
+      monitoringEnabled:
+        action === "toggle_monitoring"
+          ? monitoringEnabled === "true"
+          : undefined,
+    });
 
     return NextResponse.redirect(new URL("/settings", request.url), { status: 303 });
   }
@@ -34,16 +35,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Provider and email address are required." }, { status: 400 });
   }
 
-  const { error } = await supabase.from("seed_inboxes").insert({
-    workspace_id: workspace.workspaceId,
+  await createSeedInboxRecord({
+    workspaceId: workspace.workspaceId,
     provider,
-    email_address: emailAddress,
+    emailAddress,
     status,
   });
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
 
   return NextResponse.redirect(new URL("/settings", request.url), { status: 303 });
 }

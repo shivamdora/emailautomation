@@ -21,6 +21,7 @@ import { isWithinSendWindow } from "@/lib/utils/time";
 import { assertWorkspaceCanCreateCampaign, refreshWorkspaceUsageCounters } from "@/services/entitlement-service";
 import { getMailboxAccessTokenForAccount, sendWithMailboxProvider } from "@/services/gmail-service";
 import { instrumentHtmlForTracking, recordMessageEvent } from "@/services/telemetry-service";
+import { getSeedTemplateDefinitions } from "@/services/template-seed-service";
 
 type CampaignStepInput = {
   subject: string;
@@ -49,6 +50,20 @@ type CampaignContactContext = {
   unsubscribed_at?: string | null;
 };
 
+type ListedTemplateRecord = {
+  id: string;
+  name: string;
+  subject_template: string;
+  body_template: string;
+  body_html_template?: string | null;
+  preview_text?: string | null;
+  category?: string | null;
+  tags?: string[] | null;
+  design_preset?: string | null;
+  is_system_template?: boolean | null;
+  created_at: string;
+};
+
 function resolveCampaignWorkflowDefinition(input: {
   workflowDefinition?: Partial<CampaignWorkflowDefinition> | null;
   campaignSteps?: StoredCampaignStep[] | null;
@@ -60,6 +75,53 @@ function resolveCampaignWorkflowDefinition(input: {
   }
 
   return buildWorkflowDefinitionFromStoredSteps(input.campaignSteps ?? []);
+}
+
+function getSeedTemplateLookup() {
+  return new Map(
+    getSeedTemplateDefinitions().map((template) => [
+      `${template.name}::${template.subjectTemplate}`,
+      template,
+    ]),
+  );
+}
+
+function isLegacyIntroTemplate(template: ListedTemplateRecord) {
+  return (
+    template.name === "Intro Outreach" &&
+    template.subject_template === "Quick idea for {{company}}" &&
+    template.body_template.includes("Short, warm outreach designed to feel personal instead of automated.") &&
+    template.body_template.includes("We usually help teams tighten three things first:")
+  );
+}
+
+function hydrateListedTemplates(templates: ListedTemplateRecord[]) {
+  const seedLookup = getSeedTemplateLookup();
+  const hydrated = templates.map((template) => {
+    const seedTemplate = seedLookup.get(
+      `${template.name}::${template.subject_template}`,
+    );
+
+    return {
+      ...template,
+      body_html_template: template.body_html_template ?? seedTemplate?.bodyHtmlTemplate ?? null,
+      preview_text: template.preview_text ?? seedTemplate?.previewText ?? template.body_template.slice(0, 180),
+      category: template.category ?? seedTemplate?.category ?? null,
+      tags: template.tags ?? seedTemplate?.tags ?? [],
+      design_preset: template.design_preset ?? seedTemplate?.designPreset ?? null,
+      is_system_template: Boolean(template.is_system_template ?? seedTemplate),
+    };
+  });
+
+  const hasShelterScoreTemplate = hydrated.some(
+    (template) => template.name === "Shelter Score Launch Template",
+  );
+
+  if (!hasShelterScoreTemplate) {
+    return hydrated;
+  }
+
+  return hydrated.filter((template) => !isLegacyIntroTemplate(template));
 }
 
 function isCampaignSchemaCacheError(error: { message?: string | null; details?: string | null; hint?: string | null } | null | undefined) {
@@ -325,7 +387,7 @@ export async function listTemplates(workspaceId: string) {
   const supabase = createAdminSupabaseClient();
   let result = await supabase
     .from("templates")
-    .select("id, name, subject_template, body_template, body_html_template, preview_text, created_at")
+    .select("id, name, subject_template, body_template, body_html_template, preview_text, category, tags, design_preset, is_system_template, created_at")
     .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
 
@@ -341,19 +403,7 @@ export async function listTemplates(workspaceId: string) {
     throw result.error;
   }
 
-  return ((result.data ?? []) as Array<{
-    id: string;
-    name: string;
-    subject_template: string;
-    body_template: string;
-    body_html_template?: string | null;
-    preview_text?: string | null;
-    created_at: string;
-  }>).map((template) => ({
-    ...template,
-    body_html_template: template.body_html_template ?? null,
-    preview_text: template.preview_text ?? template.body_template.slice(0, 180),
-  }));
+  return hydrateListedTemplates((result.data ?? []) as ListedTemplateRecord[]);
 }
 
 export async function saveTemplate(input: {

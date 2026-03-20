@@ -4,6 +4,7 @@ import { buildWorkspaceShellLabel, getWorkspaceOwnerFirstName } from "@/lib/db/w
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { env, requireSupabaseConfiguration } from "@/lib/supabase/env";
 import { isMissingColumnError as isMissingSchemaColumnError } from "@/lib/utils/supabase-schema";
+import { ensureDefaultTemplatesForWorkspace, ensureDefaultTemplatesForWorkspaces } from "@/services/template-seed-service";
 
 export type WorkspaceSummary = {
   id: string;
@@ -351,6 +352,10 @@ async function ensurePersonalWorkspace(user: {
   }
 
   await ensureWorkspaceUsageCounter(workspace.id);
+  await ensureDefaultTemplatesForWorkspace({
+    workspaceId: workspace.id,
+    userId: user.id,
+  });
 
   return workspace;
 }
@@ -413,6 +418,10 @@ async function ensureSharedWorkspaceMembership(userId: string) {
   }
 
   await ensureWorkspaceUsageCounter(sharedWorkspace.id);
+  await ensureDefaultTemplatesForWorkspace({
+    workspaceId: sharedWorkspace.id,
+    userId,
+  });
 
   return {
     id: sharedWorkspace.id,
@@ -626,6 +635,7 @@ export const getWorkspaceContext = cache(async (): Promise<WorkspaceContext> => 
     listUserWorkspaces(user.id),
     selectProfileWorkspaceState(user.id),
   ]);
+  await ensureDefaultTemplatesForWorkspaces(availableWorkspaces, user.id);
 
   const profile = rawProfileResult.data as
     | {

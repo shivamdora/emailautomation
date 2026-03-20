@@ -1,6 +1,6 @@
 # OutboundFlow
 
-OutboundFlow is a production-shaped internal MVP for small outbound teams. It uses Next.js App Router, TypeScript, Tailwind CSS, shadcn-style UI primitives, Supabase Auth/Postgres/Storage/Edge Functions, and a provider-based mailbox integration layer with Gmail active in v1.
+OutboundFlow is a production-grade internal outbound platform for small teams. It uses Next.js App Router, TypeScript, Tailwind CSS, Supabase Auth/Postgres/Edge Functions, Gmail sending and reply sync, HTML email templates, CRM connectors, billing entitlements, and owned seed inbox monitoring.
 
 ## Stack
 
@@ -10,30 +10,22 @@ OutboundFlow is a production-shaped internal MVP for small outbound teams. It us
 - Supabase Auth, Postgres, Storage, Edge Functions, Cron
 - React Hook Form + Zod
 - Recharts for dashboard analytics
-- Google Gmail API for send and thread sync
+- Gmail API for mailbox send and sync
+- HubSpot and Salesforce OAuth for CRM sync
 
-## What ships in v1
+## What ships now
 
-- Email/password sign-up and sign-in
-- Default workspace bootstrap per new user
-- Profile page with separate Gmail mailbox connection flow
-- CSV/XLSX upload and Google Sheets public URL import
-- Common contacts table with custom fields
-- Template creation with merge variables
-- Campaign builder with one initial email and one 2-day follow-up
-- Background send queue and reply sync via Supabase Edge Functions
-- Thread history inside the app
-- Dashboard analytics from database state
-- RLS, audit logs, unsubscribe records, and SaaS-ready extension points
-
-## Explicitly excluded in v1
-
-- Live CRM sync
-- Multiple mailbox providers
-- Billing
-- Advanced sequencing
-- A/B testing
-- Open tracking
+- Direct sign-up with personal workspace creation and shared workspace auto-join
+- Active workspace switching and role-aware shared workspace permissions
+- Gmail mailbox connection with workspace approval gating
+- Workflow-based outbound campaigns with tracked events
+- HTML-rendered email template gallery with two seeded ready-to-use templates per workspace
+- Open and click tracking plus reply disposition handling
+- Custom CRM managed API keys and webhook writeback
+- HubSpot and Salesforce OAuth connection flows with contact sync foundations
+- Internal billing plans, entitlement enforcement, usage tracking, and billing history
+- Gmail-first seed inbox monitoring with queued placement probes and result history
+- Supabase cron functions for send queue, reply sync, CRM sync, and seed monitoring
 
 ## Project layout
 
@@ -62,117 +54,88 @@ docs/
    cp env.example .env.local
    ```
 
-3. Start local app:
+3. Start the app:
 
    ```bash
    npm run dev
    ```
 
-4. Optional helper checks:
+4. Verify locally:
 
    ```bash
    npm run lint
-   npm run test
+   npm test
+   npm run build
    ```
 
-## Windows desktop app
+## Required env vars
 
-The repo now includes an Electron-based Windows app shell in `windows-app/` that loads the hosted OutboundFlow app and does not package backend secrets.
+- `NEXT_PUBLIC_APP_URL`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `DATABASE_URL`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_OAUTH_REDIRECT_URI`
+- `HUBSPOT_CLIENT_ID`
+- `HUBSPOT_CLIENT_SECRET`
+- `HUBSPOT_OAUTH_REDIRECT_URI`
+- `SALESFORCE_CLIENT_ID`
+- `SALESFORCE_CLIENT_SECRET`
+- `SALESFORCE_OAUTH_REDIRECT_URI`
+- `SALESFORCE_AUTH_BASE_URL`
+- `TOKEN_ENCRYPTION_KEY`
+- `SUPABASE_CRON_VERIFY_SECRET`
+- `SHARED_WORKSPACE_NAME`
+- `SHARED_WORKSPACE_SLUG`
+- `SEED_MONITOR_INTERVAL_MINUTES`
 
-- Start the web app locally: `npm run dev`
-- Start the desktop app in development: `npm run desktop:dev`
-- Build the safe desktop config: `npm run desktop:build:config`
-- Build the unpacked Windows app: `npm run desktop:build`
-- Build the NSIS installer: `npm run desktop:pack`
+## Supabase rollout
 
-Desktop builds package only desktop-safe config such as the hosted app origin and custom protocol. Server secrets stay in the hosted web deployment.
+Apply migrations in order:
 
-Release notes: [docs/vercel-desktop-release.md](/Users/admin/Desktop/AI/outboundflow/outboundflow-new/emailautomation/docs/vercel-desktop-release.md)
+- [supabase/migrations/20260310235900_init_outboundflow.sql](/Users/admin/Desktop/AI/outboundflow/outboundflow-new/emailautomation/emailautomation/supabase/migrations/20260310235900_init_outboundflow.sql)
+- [supabase/migrations/20260320154500_launch_foundations.sql](/Users/admin/Desktop/AI/outboundflow/outboundflow-new/emailautomation/emailautomation/supabase/migrations/20260320154500_launch_foundations.sql)
+- [supabase/migrations/20260320190000_production_completion.sql](/Users/admin/Desktop/AI/outboundflow/outboundflow-new/emailautomation/emailautomation/supabase/migrations/20260320190000_production_completion.sql)
 
-## Supabase setup
+Detailed notes: [docs/supabase-setup.md](/Users/admin/Desktop/AI/outboundflow/outboundflow-new/emailautomation/emailautomation/docs/supabase-setup.md)
 
-1. Create a Supabase project.
-2. Apply the SQL migration in [supabase/migrations/20260310235900_init_outboundflow.sql](/D:/Jayant/AI_Jayant/Cold%20Email/supabase/migrations/20260310235900_init_outboundflow.sql).
-3. Optionally run [supabase/seed.sql](/D:/Jayant/AI_Jayant/Cold%20Email/supabase/seed.sql) after creating a test auth user.
-4. Create an `imports` Storage bucket if the migration has not already done it.
-5. Set the env vars from `env.example`.
-
-Detailed notes: [docs/supabase-setup.md](/D:/Jayant/AI_Jayant/Cold%20Email/docs/supabase-setup.md)
-
-Google sign-in for app login runs through Supabase Auth. In Google Cloud, the OAuth client used by Supabase must authorize only the Supabase callback:
-
-- `https://dbsmydauvhbnlqgezscl.supabase.co/auth/v1/callback`
-
-Then add your app URLs in Supabase Auth redirect settings:
-
-- `http://localhost:3000/auth/callback`
-- `https://outbound-flow.vercel.app/auth/callback`
-
-## Gmail OAuth setup
-
-Detailed notes: [docs/gmail-oauth.md](/D:/Jayant/AI_Jayant/Cold%20Email/docs/gmail-oauth.md)
-
-Required scopes in v1:
-
-- `https://www.googleapis.com/auth/gmail.send`
-- `https://www.googleapis.com/auth/gmail.readonly`
-- `https://www.googleapis.com/auth/gmail.modify`
-
-The Gmail connect flow is separate from Supabase Auth and lands in `/api/gmail/callback`.
-
-## Edge Functions and cron
+## Edge functions and cron
 
 Functions included:
 
 - `send-due-messages`
 - `sync-replies`
+- `crm-sync`
+- `seed-monitor`
 
 Recommended schedule:
 
 - `send-due-messages`: every 5 minutes
 - `sync-replies`: every 5 minutes
+- `crm-sync`: every 15 minutes
+- `seed-monitor`: every `SEED_MONITOR_INTERVAL_MINUTES`
 
-Both functions expect `SUPABASE_CRON_VERIFY_SECRET` and reject requests if the secret is present but missing from the `x-cron-secret` header.
+All scheduled calls should send `x-cron-secret: <SUPABASE_CRON_VERIFY_SECRET>`.
 
-## Send limits and follow-up delay
+## CRM integrations
 
-- Default per-user cap: `DEFAULT_PER_USER_DAILY_CAP`
-- Default per-minute throttle: `DEFAULT_PER_MINUTE_THROTTLE`
-- Follow-up delay: `FOLLOW_UP_DELAY_DAYS`
+- Custom CRM inbound import remains `POST /api/import/custom-crm/contacts`
+- Custom CRM auth is now connection-managed instead of env-managed
+- HubSpot and Salesforce connect through `/api/crm/connect/[provider]`
 
-Campaign-specific caps and send windows are stored per campaign in Postgres.
+Contract details: [docs/custom-crm-import.md](/Users/admin/Desktop/AI/outboundflow/outboundflow-new/emailautomation/emailautomation/docs/custom-crm-import.md)
 
-## Custom CRM placeholder API
+## Seed monitoring
 
-The extension point for future CRM ingestion is:
-
-`POST /api/import/custom-crm/contacts`
-
-Auth model:
-
-- Bearer token
-- Workspace-scoped secret from `CUSTOM_CRM_API_KEYS`
-- Idempotent upsert by `(workspace_id, external_source, external_contact_id)`
-
-Contract details: [docs/custom-crm-import.md](/D:/Jayant/AI_Jayant/Cold%20Email/docs/custom-crm-import.md)
+- Gmail seed inboxes connect through `/api/settings/seed-inboxes/connect`
+- Probe jobs are queued from Settings and processed by the `seed-monitor` function
+- Placement reporting is exact for owned monitored inboxes only
 
 ## Notes on architecture
 
-- Mailbox logic is behind `MailboxProvider` interfaces even though Gmail is the only active provider in v1.
-- CRM logic is behind `CRMAdapter` interfaces even though live CRM sync is intentionally excluded.
-- Queue state lives in Postgres tables instead of external worker infrastructure.
-- Tokens are stored server-side only and encrypted with `TOKEN_ENCRYPTION_KEY`.
-- Pages call service modules rather than embedding business logic in UI components.
-
-## Shadcn-style primitives used
-
-- `button`
-- `card`
-- `badge`
-- `input`
-- `textarea`
-- `label`
-- `table`
-- `tabs`
-- `separator`
-- `toaster`
+- Billing stays internal-only and controls entitlements rather than public payment collection.
+- CRM sync and writeback are centered on `crm_connections`, `crm_sync_runs`, `crm_object_links`, and `crm_push_jobs`.
+- Template seeding is idempotent and happens automatically for new and existing workspaces.
+- Tokens are encrypted server-side with `TOKEN_ENCRYPTION_KEY`.

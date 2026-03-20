@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { refreshWorkspaceUsageCounters } from "@/services/entitlement-service";
+import { updateWorkspaceBillingAccount } from "@/services/billing-service";
 
 export async function POST(request: Request) {
   const workspace = await getWorkspaceContext();
@@ -12,32 +13,21 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const planKey = String(formData.get("planKey") ?? "").trim();
   const status = String(formData.get("status") ?? "active").trim() || "active";
+  const renewalAt = String(formData.get("renewalAt") ?? "").trim();
 
   if (!planKey) {
     return NextResponse.json({ error: "Plan key is required." }, { status: 400 });
   }
 
-  const supabase = createAdminSupabaseClient();
-  const { error } = await (supabase.from("workspace_billing_accounts") as unknown as {
-    upsert: (
-      value: Record<string, unknown>,
-      options?: Record<string, unknown>,
-    ) => Promise<{ error: { message: string } | null }>;
-  }).upsert(
-    {
-      workspace_id: workspace.workspaceId,
-      provider: "internal",
-      status,
-      plan_key: planKey,
-      assigned_by_user_id: workspace.userId,
-      assigned_at: new Date().toISOString(),
-    },
-    { onConflict: "workspace_id" },
-  );
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  const usageSnapshot = await refreshWorkspaceUsageCounters(workspace.workspaceId);
+  await updateWorkspaceBillingAccount({
+    workspaceId: workspace.workspaceId,
+    actorUserId: workspace.userId,
+    planKey,
+    status,
+    renewalAt: renewalAt || null,
+    usageSnapshot,
+  });
 
   return NextResponse.redirect(new URL("/settings", request.url), { status: 303 });
 }

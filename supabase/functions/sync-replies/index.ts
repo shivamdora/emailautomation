@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { config } from "../shared/config.ts";
+import { enqueueCrmWritebackJobs } from "../shared/crm.ts";
 import { decryptToken, encryptToken } from "../shared/crypto.ts";
 import { gmailGetThread, gmailListThreads, gmailRefreshAccessToken } from "../shared/gmail.ts";
 import { json } from "../shared/response.ts";
@@ -210,6 +211,22 @@ Deno.serve(async (request) => {
                 disposition,
                 fromEmail,
                 subject: headers.Subject ?? null,
+              },
+            });
+            await enqueueCrmWritebackJobs({
+              supabase,
+              workspaceId: mailbox.workspace_id,
+              campaignContactId: threadRecord.campaign_contact_id,
+              eventType:
+                disposition === "negative"
+                  ? "unsubscribed"
+                  : disposition === "booked"
+                    ? "meeting_booked"
+                    : "replied",
+              metadata: {
+                disposition,
+                subject: headers.Subject ?? null,
+                fromEmail,
               },
             });
           }

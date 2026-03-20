@@ -4,6 +4,7 @@ import { Buffer } from "buffer";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { env, requireSupabaseConfiguration } from "@/lib/supabase/env";
 import { normalizeEmailHtmlDocument } from "@/lib/utils/html";
+import { enqueueCrmWritebackFromEvent } from "@/services/crm-service";
 
 type TrackingPayload = {
   workspaceId: string;
@@ -60,6 +61,17 @@ export async function recordMessageEvent(input: {
 
   if (error) {
     throw error;
+  }
+
+  try {
+    await enqueueCrmWritebackFromEvent({
+      workspaceId: input.workspaceId,
+      campaignContactId: input.campaignContactId ?? null,
+      eventType: input.eventType,
+      metadata: input.metadata ?? {},
+    });
+  } catch (writebackError) {
+    console.error("Failed to enqueue CRM writeback", writebackError);
   }
 }
 

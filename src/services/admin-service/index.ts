@@ -1,24 +1,37 @@
 import "server-only";
 import { listWorkspaceMembers } from "@/lib/db/workspace";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { env, isGoogleConfigured, isSupabaseConfigured, requireSupabaseConfiguration } from "@/lib/supabase/env";
-import { isAnyMissingColumnResult, isMissingTableResult } from "@/lib/utils/supabase-schema";
+import {
+  env,
+  isGoogleConfigured,
+  isHubSpotConfigured,
+  isSalesforceConfigured,
+  isSupabaseConfigured,
+  requireSupabaseConfiguration,
+} from "@/lib/supabase/env";
+import { isAnyMissingColumnResult } from "@/lib/utils/supabase-schema";
+import { getWorkspaceBillingTimeline, getWorkspacePlanLimits } from "@/services/billing-service";
+import { listWorkspaceCrmConnections } from "@/services/crm-service";
 import { getWorkspaceGmailAccounts } from "@/services/gmail-service";
+import { getWorkspaceSeedMonitorSummary } from "@/services/seed-monitor-service";
 
 export async function getWorkspaceAdminSummary(workspaceId: string) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
-  const [members, gmailAccounts, usageCounter] = await Promise.all([
+  const [members, gmailAccounts, usageCounter, billingTimeline, planLimits, seedMonitorSummary] = await Promise.all([
     listWorkspaceMembers(workspaceId),
     getWorkspaceGmailAccounts(workspaceId),
     supabase
       .from("workspace_usage_counters")
-      .select("daily_sends_used, active_campaigns_count, connected_mailboxes_count, seats_used, period_start")
+      .select("daily_sends_used, active_campaigns_count, connected_mailboxes_count, seats_used, period_start, crm_connections_count, seed_inboxes_count, monthly_sends_used")
       .eq("workspace_id", workspaceId)
       .order("period_start", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    getWorkspaceBillingTimeline(workspaceId),
+    getWorkspacePlanLimits(workspaceId),
+    getWorkspaceSeedMonitorSummary(workspaceId),
   ]);
 
   let billingAccount = await supabase
@@ -42,34 +55,8 @@ export async function getWorkspaceAdminSummary(workspaceId: string) {
       .maybeSingle();
   }
 
-  let crmConnections = await supabase
-    .from("crm_connections")
-    .select("id, provider, status, provider_account_label, last_synced_at")
-    .eq("workspace_id", workspaceId)
-    .order("created_at", { ascending: false });
-
-  if (
-    isAnyMissingColumnResult(crmConnections, [
-      { table: "crm_connections", column: "provider_account_label" },
-      { table: "crm_connections", column: "last_synced_at" },
-    ])
-  ) {
-    crmConnections = await supabase
-      .from("crm_connections")
-      .select("id, provider, status")
-      .eq("workspace_id", workspaceId)
-      .order("created_at", { ascending: false });
-  }
-
-  let seedInboxes = await supabase
-    .from("seed_inboxes")
-    .select("id, provider, email_address, status, last_checked_at, last_error")
-    .eq("workspace_id", workspaceId)
-    .order("created_at", { ascending: false });
-
-  if (isMissingTableResult(seedInboxes, "seed_inboxes")) {
-    seedInboxes = { data: [], error: null } as typeof seedInboxes;
-  }
+  const crmConnections = await listWorkspaceCrmConnections(workspaceId);
+  const seedInboxes = seedMonitorSummary.seedInboxes;
 
   return {
     members,
@@ -93,23 +80,45 @@ export async function getWorkspaceAdminSummary(workspaceId: string) {
           connected_mailboxes_count: number;
           seats_used: number;
           period_start: string;
+          crm_connections_count?: number;
+          seed_inboxes_count?: number;
+          monthly_sends_used?: number;
         }
       | null,
-    crmConnections: ((crmConnections.data ?? []) as Array<{
+    planLimits,
+    billingTimeline,
+    crmConnections: crmConnections as Array<{
       id: string;
       provider: string;
       status: string;
+      auth_type?: string | null;
       provider_account_label?: string | null;
+      provider_account_email?: string | null;
+      inbound_api_key_hint?: string | null;
+      outbound_webhook_url?: string | null;
       last_synced_at?: string | null;
-    }>) ?? [],
-    seedInboxes: ((seedInboxes.data ?? []) as Array<{
+      last_writeback_at?: string | null;
+      last_error?: string | null;
+    }>,
+    seedInboxes: seedInboxes as Array<{
       id: string;
       provider: string;
       email_address: string;
       status: string;
+      connection_status?: string | null;
+      health_status?: string | null;
       last_checked_at?: string | null;
+      last_probe_at?: string | null;
+      last_result_status?: string | null;
       last_error?: string | null;
-    }>) ?? [],
+    }>,
+    seedResults: seedMonitorSummary.recentResults as Array<{
+      id: string;
+      seed_inbox_id: string;
+      placement_status: string;
+      observed_at: string;
+      probe_key: string;
+    }>,
   };
 }
 
@@ -128,6 +137,18 @@ export function getWorkspaceHealthSummary() {
       summary: isGoogleConfigured ? "Mailbox OAuth is configured." : "Mailbox OAuth is not fully configured yet.",
     },
     {
+      key: "hubspot",
+      label: "HubSpot OAuth",
+      status: isHubSpotConfigured ? "healthy" : "warning",
+      summary: isHubSpotConfigured ? "HubSpot CRM connect is configured." : "HubSpot OAuth keys are missing.",
+    },
+    {
+      key: "salesforce",
+      label: "Salesforce OAuth",
+      status: isSalesforceConfigured ? "healthy" : "warning",
+      summary: isSalesforceConfigured ? "Salesforce CRM connect is configured." : "Salesforce OAuth keys are missing.",
+    },
+    {
       key: "shared-workspace",
       label: "Shared workspace",
       status: env.SHARED_WORKSPACE_SLUG ? "healthy" : "warning",
@@ -142,6 +163,12 @@ export function getWorkspaceHealthSummary() {
       summary: env.SUPABASE_CRON_VERIFY_SECRET
         ? "Scheduled jobs can verify cron calls."
         : "Cron verification secret is missing.",
+    },
+    {
+      key: "seed-monitor",
+      label: "Seed monitor cadence",
+      status: env.SEED_MONITOR_INTERVAL_MINUTES ? "healthy" : "warning",
+      summary: `Seed inbox probes run every ${env.SEED_MONITOR_INTERVAL_MINUTES} minutes when the monitor function is deployed.`,
     },
   ] as const;
 }

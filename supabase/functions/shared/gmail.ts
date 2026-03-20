@@ -97,3 +97,37 @@ export async function gmailGetThread(accessToken: string, threadId: string) {
 
   return await response.json();
 }
+
+export async function gmailListMessages(accessToken: string, query: string, maxResults = 10) {
+  const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
+  url.searchParams.set("q", query);
+  url.searchParams.set("maxResults", String(maxResults));
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gmail message list failed: ${await response.text()}`);
+  }
+
+  return await response.json();
+}
+
+export async function gmailGetMessage(accessToken: string, messageId: string) {
+  const response = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Gmail message fetch failed: ${await response.text()}`);
+  }
+
+  return await response.json();
+}

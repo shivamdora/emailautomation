@@ -16,6 +16,10 @@ export default async function TemplatesPage() {
     body_template: string;
     body_html_template?: string | null;
     preview_text?: string | null;
+    category?: string | null;
+    tags?: string[] | null;
+    design_preset?: string | null;
+    is_system_template?: boolean;
   }>;
 
   return (
@@ -35,6 +39,11 @@ export default async function TemplatesPage() {
                 <div className="space-y-1">
                   <CardTitle>{template.name}</CardTitle>
                   <p className="text-sm text-muted-foreground">{template.subject_template}</p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {template.is_system_template ? <Badge variant="success">Ready to use</Badge> : null}
+                    {template.category ? <Badge variant="neutral">{template.category}</Badge> : null}
+                    {template.design_preset ? <Badge variant="neutral">{template.design_preset}</Badge> : null}
+                  </div>
                 </div>
                 <Badge variant={template.body_html_template ? "success" : "neutral"}>
                   {template.body_html_template
@@ -55,6 +64,15 @@ export default async function TemplatesPage() {
                 <div className="rounded-[1.25rem] border border-dashed border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground">
                   {(template.preview_text ?? template.body_template.slice(0, 180)) || productContent.shared.noBodyLabel}
                 </div>
+                {template.tags?.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {template.tags.map((tag) => (
+                      <Badge key={`${template.id}-${tag}`} variant="neutral">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           ))

@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SignJWT } from "https://esm.sh/jose@6.2.1";
 import { config } from "../shared/config.ts";
 import { decryptToken, encryptToken } from "../shared/crypto.ts";
+import { enqueueCrmWritebackJobs } from "../shared/crm.ts";
 import { gmailRefreshAccessToken, gmailSend } from "../shared/gmail.ts";
 import { json } from "../shared/response.ts";
 
@@ -241,6 +242,48 @@ async function resolveMailboxAccess(mailbox: {
   return refreshed.access_token as string;
 }
 
+async function getWorkspaceSendState(workspaceId: string) {
+  const [billingAccount, dailyCount, monthlyCount] = await Promise.all([
+    supabase
+      .from("workspace_billing_accounts")
+      .select("status, plan_key")
+      .eq("workspace_id", workspaceId)
+      .maybeSingle(),
+    supabase
+      .from("outbound_messages")
+      .select("id, campaign_contact:campaign_contacts!inner(campaign:campaigns!inner(workspace_id))", {
+        count: "exact",
+        head: true,
+      })
+      .eq("campaign_contact.campaign.workspace_id", workspaceId)
+      .eq("status", "sent")
+      .gte("sent_at", new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())).toISOString()),
+    supabase
+      .from("outbound_messages")
+      .select("id, campaign_contact:campaign_contacts!inner(campaign:campaigns!inner(workspace_id))", {
+        count: "exact",
+        head: true,
+      })
+      .eq("campaign_contact.campaign.workspace_id", workspaceId)
+      .eq("status", "sent")
+      .gte("sent_at", new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString()),
+  ]);
+  const planKey = billingAccount.data?.plan_key ?? "internal_mvp";
+  const planLimits = await supabase
+    .from("plan_limits")
+    .select("daily_sends_limit, monthly_sends_limit")
+    .eq("plan_key", planKey)
+    .maybeSingle();
+
+  return {
+    billingStatus: billingAccount.data?.status ?? "active",
+    dailyLimit: planLimits.data?.daily_sends_limit ?? 250,
+    monthlyLimit: planLimits.data?.monthly_sends_limit ?? 5000,
+    dailyUsed: dailyCount.count ?? 0,
+    monthlyUsed: monthlyCount.count ?? 0,
+  };
+}
+
 Deno.serve(async (request) => {
   if (!verifyCron(request)) {
     return json({ error: "Unauthorized" }, { status: 401 });
@@ -285,6 +328,10 @@ Deno.serve(async (request) => {
   }
 
   let processed = 0;
+  const workspaceSendCache = new Map<
+    string,
+    { billingStatus: string; dailyLimit: number; monthlyLimit: number; dailyUsed: number; monthlyUsed: number }
+  >();
 
   for (const item of dueContacts ?? []) {
     const campaign = item.campaign;
@@ -304,6 +351,46 @@ Deno.serve(async (request) => {
     const step = workflowSteps.find((candidate) => Number(candidate.stepNumber) === Number(item.current_step));
 
     if (!step) {
+      continue;
+    }
+
+    let workspaceSendState = workspaceSendCache.get(campaign.workspace_id);
+
+    if (!workspaceSendState) {
+      workspaceSendState = await getWorkspaceSendState(campaign.workspace_id);
+      workspaceSendCache.set(campaign.workspace_id, workspaceSendState);
+    }
+
+    if (!["active", "trialing"].includes(workspaceSendState.billingStatus)) {
+      await supabase
+        .from("campaign_contacts")
+        .update({
+          error_message: "Workspace billing status is not active for sending.",
+          next_due_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        })
+        .eq("id", item.id);
+      continue;
+    }
+
+    if (workspaceSendState.dailyUsed >= workspaceSendState.dailyLimit) {
+      await supabase
+        .from("campaign_contacts")
+        .update({
+          error_message: "Workspace daily send limit reached.",
+          next_due_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        })
+        .eq("id", item.id);
+      continue;
+    }
+
+    if (workspaceSendState.monthlyUsed >= workspaceSendState.monthlyLimit) {
+      await supabase
+        .from("campaign_contacts")
+        .update({
+          error_message: "Workspace monthly send limit reached.",
+          next_due_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+        })
+        .eq("id", item.id);
       continue;
     }
 
@@ -458,6 +545,19 @@ Deno.serve(async (request) => {
           toEmail: contact.email,
         },
       });
+      await enqueueCrmWritebackJobs({
+        supabase,
+        workspaceId: campaign.workspace_id,
+        campaignContactId: item.id,
+        eventType: "sent",
+        metadata: {
+          stepNumber: item.current_step,
+          subject: renderedSubject,
+        },
+      });
+
+      workspaceSendState.dailyUsed += 1;
+      workspaceSendState.monthlyUsed += 1;
 
       processed += 1;
     } catch (sendError) {
