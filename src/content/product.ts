@@ -568,7 +568,7 @@ export const productContent: ProductContent = {
     title: "Dashboard",
     description:
       "Track list size, sends, replies, and the next actions that get this workspace live.",
-    liveRefreshLabel: "Live sync every 15s",
+    liveRefreshLabel: "Auto refresh while active",
     kpis: {
       totalLeads: "Total leads",
       queued: "Queued",
@@ -892,7 +892,7 @@ export const productContent: ProductContent = {
       eyebrow: "Inbox",
       title: "Inbox",
       description: "Review synced Gmail threads and reply from the shared workspace.",
-      liveRefreshLabel: "Inbox sync every 15s",
+      liveRefreshLabel: "Inbox refresh while active",
     },
     viewer: {
       listTitle: "Recent threads",

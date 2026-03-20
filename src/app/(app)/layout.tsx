@@ -1,6 +1,6 @@
+import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/app-shell";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { requireSessionUser } from "@/lib/auth/session";
 import { requireSupabaseConfiguration } from "@/lib/supabase/env";
 
 export const dynamic = "force-dynamic";
@@ -11,8 +11,17 @@ export default async function ProtectedAppLayout({
   children: React.ReactNode;
 }) {
   requireSupabaseConfiguration();
-  await requireSessionUser();
-  const workspace = await getWorkspaceContext();
+  let workspace: Awaited<ReturnType<typeof getWorkspaceContext>>;
+
+  try {
+    workspace = await getWorkspaceContext();
+  } catch (error) {
+    if (error instanceof Error && error.message === "No authenticated user session.") {
+      redirect("/sign-in");
+    }
+
+    throw error;
+  }
 
   return <AppShell brandSubtitle={workspace.workspaceLabel}>{children}</AppShell>;
 }

@@ -4,15 +4,9 @@ import { ThreadViewer } from "@/components/threads/thread-viewer";
 import { productContent } from "@/content/product";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { listThreads } from "@/services/analytics-service";
-import { syncWorkspaceReplies } from "@/services/gmail-service";
 
 export default async function InboxPage() {
   const workspace = await getWorkspaceContext();
-  try {
-    await syncWorkspaceReplies(workspace.workspaceId);
-  } catch (error) {
-    console.error("Inbox sync failed", error);
-  }
   const threads = (await listThreads(workspace.workspaceId)) as Array<{
     id: string;
     subject: string | null;
@@ -36,7 +30,12 @@ export default async function InboxPage() {
         eyebrow={productContent.inbox.header.eyebrow}
         title={productContent.inbox.header.title}
         description={productContent.inbox.header.description}
-        actions={<LiveRefresh label={productContent.inbox.header.liveRefreshLabel} />}
+        actions={
+          <LiveRefresh
+            label={productContent.inbox.header.liveRefreshLabel}
+            syncEndpoint="/api/replies/sync"
+          />
+        }
       />
       <ThreadViewer threads={threads} />
     </div>

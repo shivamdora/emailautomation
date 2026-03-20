@@ -10,6 +10,7 @@ import {
   Zap,
 } from "lucide-react";
 import { RotatingEyebrow } from "@/components/marketing/rotating-eyebrow";
+import { DeferredHeroVideo } from "@/components/marketing/deferred-hero-video";
 import { Button } from "@/components/ui/button";
 import { ScrollReveal } from "@/components/marketing/scroll-reveal";
 import { getSessionUser } from "@/lib/auth/session";
@@ -163,14 +164,7 @@ export default async function HomePage() {
         <HydrationSafeDiv className="marketing-orb marketing-orb-bottom" />
 
         <HydrationSafeDiv className="marketing-hero">
-          <video
-            className="marketing-hero-video"
-            src="/media/outboundflow-hero.mp4"
-            autoPlay
-            muted
-            loop
-            playsInline
-          />
+          <DeferredHeroVideo />
           <HydrationSafeDiv className="marketing-hero-overlay" />
 
           <HydrationSafeDiv className="relative z-10 mx-auto flex max-w-7xl flex-col gap-8 px-6 pb-16 pt-4 md:px-10 md:pb-24 md:pt-5 lg:px-14 lg:pb-32">
