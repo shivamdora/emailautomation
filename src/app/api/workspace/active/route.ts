@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { invalidateShell, invalidateWorkspace } from "@/lib/cache/namespaces";
 import { getSessionUser } from "@/lib/auth/session";
-import { setActiveWorkspace } from "@/lib/db/workspace";
+import { bootstrapWorkspaceForUser, getWorkspaceContext, setActiveWorkspace } from "@/lib/db/workspace";
 
 function redirectTo(url: URL, searchParams: Record<string, string>) {
   for (const [key, value] of Object.entries(searchParams)) {
@@ -37,7 +38,20 @@ export async function POST(request: Request) {
   }
 
   try {
+    const previousWorkspace = await getWorkspaceContext().catch(() => null);
     const result = await setActiveWorkspace(user.id, workspaceId);
+    await bootstrapWorkspaceForUser({
+      id: user.id,
+      email: user.email ?? null,
+      user_metadata: (user.user_metadata as { full_name?: string | null } | null) ?? null,
+    });
+    await Promise.all([
+      invalidateShell(user.id),
+      invalidateWorkspace(user.id, workspaceId),
+      previousWorkspace?.workspaceId
+        ? invalidateWorkspace(user.id, previousWorkspace.workspaceId)
+        : Promise.resolve(),
+    ]);
 
     if (isJsonRequest) {
       return NextResponse.json(result);

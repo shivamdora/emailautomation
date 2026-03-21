@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+const booleanFlagSchema = z.preprocess((value) => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return /^(1|true|yes|on)$/i.test(value.trim());
+  }
+
+  return false;
+}, z.boolean());
+
 const envSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
@@ -40,6 +52,11 @@ const envSchema = z.object({
   FOLLOW_UP_DELAY_DAYS: z.coerce.number().default(2),
   SEED_MONITOR_INTERVAL_MINUTES: z.coerce.number().default(30),
   SUPABASE_CRON_VERIFY_SECRET: z.string().optional(),
+  USE_REDIS_CACHE: booleanFlagSchema.default(false),
+  REDIS_CACHE_MODE: z.enum(["off", "shadow", "live"]).default("off"),
+  REDIS_CACHE_PREFIX: z.string().min(1).default("outboundflow:v1"),
+  UPSTASH_REDIS_REST_URL: z.string().url().optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
 });
 
 const rawEnv = {
@@ -82,6 +99,11 @@ const rawEnv = {
   FOLLOW_UP_DELAY_DAYS: process.env.FOLLOW_UP_DELAY_DAYS,
   SEED_MONITOR_INTERVAL_MINUTES: process.env.SEED_MONITOR_INTERVAL_MINUTES,
   SUPABASE_CRON_VERIFY_SECRET: process.env.SUPABASE_CRON_VERIFY_SECRET,
+  USE_REDIS_CACHE: process.env.USE_REDIS_CACHE,
+  REDIS_CACHE_MODE: process.env.REDIS_CACHE_MODE,
+  REDIS_CACHE_PREFIX: process.env.REDIS_CACHE_PREFIX,
+  UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
+  UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
 };
 
 const parsed = envSchema.safeParse(rawEnv);
@@ -93,6 +115,9 @@ export const env = parsed.success
       DEFAULT_PER_MINUTE_THROTTLE: 10,
       FOLLOW_UP_DELAY_DAYS: 2,
       SEED_MONITOR_INTERVAL_MINUTES: 30,
+      USE_REDIS_CACHE: false,
+      REDIS_CACHE_MODE: "off" as const,
+      REDIS_CACHE_PREFIX: "outboundflow:v1",
     };
 
 function isPlaceholderSecret(value?: string) {
@@ -145,6 +170,12 @@ export const isSlackConfigured = Boolean(
 export const isCalendlyConfigured = Boolean(
   env.CALENDLY_CLIENT_ID &&
     env.CALENDLY_CLIENT_SECRET,
+);
+
+export const isRedisCacheConfigured = Boolean(
+  env.USE_REDIS_CACHE &&
+    env.UPSTASH_REDIS_REST_URL &&
+    env.UPSTASH_REDIS_REST_TOKEN,
 );
 
 export function requireSupabaseConfiguration() {

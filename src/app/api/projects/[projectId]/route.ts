@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { updateProject } from "@/services/project-service";
 
@@ -40,6 +41,14 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       senderSignature: String(body.senderSignature ?? "").trim() || null,
       logoUrl: String(body.logoUrl ?? "").trim() || null,
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId,
+      },
+      { includeShell: true, includeWorkspace: true },
+    );
 
     return NextResponse.json(project);
   } catch (error) {
@@ -73,6 +82,14 @@ export async function POST(request: Request, { params }: RouteParams) {
       senderSignature: String(formData.get("senderSignature") ?? "").trim() || null,
       logoUrl: String(formData.get("logoUrl") ?? "").trim() || null,
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId,
+      },
+      { includeShell: true, includeWorkspace: true },
+    );
 
     return redirectTo(new URL("/settings/projects", request.url), {
       status: "updated",

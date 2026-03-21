@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useDeferredValue, useId, useMemo, useState, useTransition } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -94,6 +95,7 @@ export function CampaignWizard({
   initialValues,
   initialSelectedTemplateId,
 }: WizardProps) {
+  const router = useRouter();
   const resolvedInitialValues = useMemo(() => {
     const baseValues =
       initialValues ??
@@ -419,13 +421,13 @@ export function CampaignWizard({
 
         if (mode === "edit") {
           toast.success(creatorCopy.toasts.updated);
-          window.location.href = `/campaigns/${resolvedCampaignId}`;
+          router.push(`/campaigns/${resolvedCampaignId}`);
           return;
         }
 
         if (!sendNow) {
           toast.success(creatorCopy.toasts.launched);
-          window.location.href = `/campaigns/${resolvedCampaignId}`;
+          router.push(`/campaigns/${resolvedCampaignId}`);
           return;
         }
 
@@ -437,13 +439,13 @@ export function CampaignWizard({
         const sendPayload = await sendResponse.json().catch(() => null);
         if (!sendResponse.ok) {
           toast.error(typeof sendPayload?.error === "string" ? sendPayload.error : creatorCopy.toasts.sendNowFailed);
-          window.location.href = `/campaigns/${resolvedCampaignId}`;
+          router.push(`/campaigns/${resolvedCampaignId}`);
           return;
         }
 
         const processed = Number(sendPayload?.processed ?? 0);
         toast.success(processed > 0 ? creatorCopy.toasts.launchedAndSent(processed) : creatorCopy.toasts.launchedNoReadyContacts);
-        window.location.href = `/campaigns/${resolvedCampaignId}`;
+        router.push(`/campaigns/${resolvedCampaignId}`);
       });
     })();
   }

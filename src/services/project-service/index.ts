@@ -8,7 +8,6 @@ import {
 } from "@/lib/projects/shared";
 import {
   ensureDefaultTemplatesForProject,
-  ensureDefaultTemplatesForProjects,
 } from "@/services/template-seed-service";
 
 function toProjectServiceError(step: string, error: unknown) {
@@ -130,25 +129,10 @@ export async function listWorkspaceProjects(workspaceId: string) {
   return selectWorkspaceProjects(workspaceId);
 }
 
-export async function ensureWorkspaceProjects(input: {
+async function loadActiveProjectForUser(input: {
   workspaceId: string;
-  workspaceName: string;
   userId: string;
 }) {
-  requireSupabaseConfiguration();
-  let projects = await selectWorkspaceProjects(input.workspaceId);
-
-  if (!projects.length) {
-    const defaultProject = await ensureDefaultProject(input);
-    projects = [defaultProject];
-  } else {
-    await ensureDefaultTemplatesForProjects({
-      workspaceId: input.workspaceId,
-      projects,
-      userId: input.userId,
-    });
-  }
-
   const supabase = createAdminSupabaseClient();
   const { data: rawMembership, error } = await supabase
     .from("workspace_members")
@@ -161,7 +145,47 @@ export async function ensureWorkspaceProjects(input: {
     throw toProjectServiceError("loading the active project", error);
   }
 
-  const membership = rawMembership as { last_active_project_id?: string | null } | null;
+  return rawMembership as { last_active_project_id?: string | null } | null;
+}
+
+export async function getWorkspaceProjectsContext(input: {
+  workspaceId: string;
+  userId: string;
+}) {
+  requireSupabaseConfiguration();
+  const projects = await selectWorkspaceProjects(input.workspaceId);
+
+  if (!projects.length) {
+    throw new Error("No workspace projects found.");
+  }
+
+  const membership = await loadActiveProjectForUser(input);
+  const activeProject =
+    projects.find((project) => project.id === membership?.last_active_project_id) ?? projects[0];
+
+  return {
+    availableProjects: projects,
+    activeProject,
+  };
+}
+
+export async function bootstrapWorkspaceProjects(input: {
+  workspaceId: string;
+  workspaceName: string;
+  userId: string;
+}) {
+  requireSupabaseConfiguration();
+  let projects = await selectWorkspaceProjects(input.workspaceId);
+
+  if (!projects.length) {
+    const defaultProject = await ensureDefaultProject(input);
+    projects = [defaultProject];
+  }
+
+  const membership = await loadActiveProjectForUser({
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+  });
   const activeProject =
     projects.find((project) => project.id === membership?.last_active_project_id) ?? projects[0];
 

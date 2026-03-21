@@ -1,12 +1,12 @@
 import { CampaignWizard } from "@/components/campaigns/campaign-wizard";
 import { PageHeader } from "@/components/layout/page-header";
 import { productContent } from "@/content/product";
+import { getCachedContacts, getCachedTemplates } from "@/lib/cache/read-models";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import type { TemplateListItem } from "@/lib/templates/gallery";
 import { buildWorkflowDefinitionFromStoredSteps, normalizeWorkflowDefinition } from "@/lib/workflows/definition";
-import { getCampaignForEditing, listTemplates } from "@/services/campaign-service";
+import { getCampaignForEditing } from "@/services/campaign-service";
 import { getWorkspaceGmailAccounts } from "@/services/gmail-service";
-import { listContacts } from "@/services/import-service";
 
 export default async function EditCampaignPage({
   params,
@@ -21,8 +21,8 @@ export default async function EditCampaignPage({
       onlyApproved: true,
       projectId: workspace.activeProjectId,
     }),
-    listContacts(workspace.workspaceId, workspace.activeProjectId),
-    listTemplates(workspace.workspaceId, workspace.activeProjectId),
+    getCachedContacts(workspace.userId, workspace.workspaceId, workspace.activeProjectId),
+    getCachedTemplates(workspace.userId, workspace.workspaceId, workspace.activeProjectId),
   ]);
   const gmailAccounts = rawGmailAccounts as Array<{ id: string; email_address: string }>;
   const templates = rawTemplates as TemplateListItem[];

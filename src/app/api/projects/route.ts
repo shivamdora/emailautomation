@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { createProject } from "@/services/project-service";
 
@@ -43,6 +44,14 @@ export async function POST(request: Request) {
       senderSignature: String(body.senderSignature ?? "").trim() || null,
       logoUrl: String(body.logoUrl ?? "").trim() || null,
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId: project.id,
+      },
+      { includeShell: true, includeWorkspace: true },
+    );
 
     if (contentType.includes("application/json")) {
       return NextResponse.json(project);

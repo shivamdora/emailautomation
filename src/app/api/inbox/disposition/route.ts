@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { classifyReplyDisposition } from "@/lib/utils/reply-disposition";
@@ -99,6 +100,18 @@ export async function POST(request: Request) {
     eventType: replyDisposition === "negative" ? "unsubscribed" : replyDisposition === "booked" ? "meeting_booked" : "replied",
     metadata: { manualOverride: true, replyDisposition },
   });
+  await invalidateProjectReadModels(
+    {
+      userId: workspace.userId,
+      workspaceId: workspace.workspaceId,
+      projectId: workspace.activeProjectId,
+    },
+    {
+      includeWorkspace: true,
+      includeInbox: true,
+      threadId: threadRecordId,
+    },
+  );
 
   return NextResponse.json({ ok: true, replyDisposition, status });
 }

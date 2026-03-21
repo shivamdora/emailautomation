@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { inboxReplySchema } from "@/lib/zod/schemas";
 import { sendReplyToThread } from "@/services/gmail-service";
@@ -22,6 +23,18 @@ export async function POST(request: Request) {
     targetId: payload.data.threadRecordId,
     metadata: { gmailMessageId: result.gmailMessageId, recipientEmail: result.recipientEmail },
   });
+  await invalidateProjectReadModels(
+    {
+      userId: workspace.userId,
+      workspaceId: workspace.workspaceId,
+      projectId: workspace.activeProjectId,
+    },
+    {
+      includeWorkspace: true,
+      includeInbox: true,
+      threadId: payload.data.threadRecordId,
+    },
+  );
 
   return NextResponse.json(result);
 }

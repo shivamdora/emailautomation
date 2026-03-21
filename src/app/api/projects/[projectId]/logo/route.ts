@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { uploadProjectLogo } from "@/services/project-service";
 
@@ -20,6 +21,14 @@ export async function POST(request: Request, { params }: RouteParams) {
       file: file instanceof File ? file : null,
       logoUrl,
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId,
+      },
+      { includeShell: true, includeWorkspace: true },
+    );
 
     return NextResponse.json({
       ok: true,

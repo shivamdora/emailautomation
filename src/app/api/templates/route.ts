@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { templateSchema } from "@/lib/zod/schemas";
 import { saveTemplate } from "@/services/campaign-service";
@@ -25,6 +26,11 @@ export async function POST(request: Request) {
     action: "template.created",
     targetType: "template",
     targetId: template.id,
+  });
+  await invalidateProjectReadModels({
+    userId: workspace.userId,
+    workspaceId: workspace.workspaceId,
+    projectId: workspace.activeProjectId,
   });
 
   return NextResponse.json(template);

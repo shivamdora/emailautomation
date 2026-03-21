@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { AppShell } from "@/components/layout/app-shell";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { requireSupabaseConfiguration } from "@/lib/supabase/env";
-
-export const dynamic = "force-dynamic";
 
 export default async function ProtectedAppLayout({
   children,
@@ -11,6 +10,7 @@ export default async function ProtectedAppLayout({
   children: React.ReactNode;
 }) {
   requireSupabaseConfiguration();
+  await connection();
   let workspace: Awaited<ReturnType<typeof getWorkspaceContext>>;
 
   try {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { requireSupabaseConfiguration } from "@/lib/supabase/env";
@@ -52,6 +53,14 @@ export async function POST(request: Request) {
       targetId: result.importId,
       metadata: { importedCount: result.importedCount },
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId: workspace.activeProjectId,
+      },
+      { includeWorkspace: true },
+    );
 
     if (isClientImportRequest(request)) {
       return NextResponse.json({

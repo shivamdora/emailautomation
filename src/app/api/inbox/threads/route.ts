@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { getCachedInboxThreadSummaries } from "@/lib/cache/read-models";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { listInboxThreadSummaries } from "@/services/analytics-service";
 
 export async function GET(request: Request) {
   try {
@@ -8,7 +8,9 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const limit = Number(url.searchParams.get("limit") ?? "10");
     const offset = Number(url.searchParams.get("offset") ?? "0");
-    const result = await listInboxThreadSummaries(workspace.workspaceId, {
+    const result = await getCachedInboxThreadSummaries({
+      userId: workspace.userId,
+      workspaceId: workspace.workspaceId,
       projectId: workspace.activeProjectId,
       limit: Number.isFinite(limit) ? limit : 10,
       offset: Number.isFinite(offset) ? offset : 0,

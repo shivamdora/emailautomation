@@ -2,12 +2,15 @@ import { LiveRefresh } from "@/components/layout/live-refresh";
 import { PageHeader } from "@/components/layout/page-header";
 import { ThreadViewer } from "@/components/threads/thread-viewer";
 import { productContent } from "@/content/product";
+import { getCachedInboxThreadSummaries } from "@/lib/cache/read-models";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { getInboxThreadDetail, listInboxThreadSummaries } from "@/services/analytics-service";
+import { getInboxThreadDetail } from "@/services/analytics-service";
 
 export default async function InboxPage() {
   const workspace = await getWorkspaceContext();
-  const initialThreadBatch = await listInboxThreadSummaries(workspace.workspaceId, {
+  const initialThreadBatch = await getCachedInboxThreadSummaries({
+    userId: workspace.userId,
+    workspaceId: workspace.workspaceId,
     projectId: workspace.activeProjectId,
     limit: 10,
     offset: 0,

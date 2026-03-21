@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { contactUpdateSchema } from "@/lib/zod/schemas";
 import { deleteContact, updateContact } from "@/services/import-service";
@@ -37,6 +38,14 @@ export async function PATCH(
       targetType: "contact",
       targetId: contactId,
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId: workspace.activeProjectId,
+      },
+      { includeWorkspace: true },
+    );
 
     return NextResponse.json({ contact });
   } catch (error) {
@@ -65,6 +74,14 @@ export async function DELETE(
       targetType: "contact",
       targetId: contactId,
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId: workspace.activeProjectId,
+      },
+      { includeWorkspace: true },
+    );
 
     return NextResponse.json({ ok: true, contactId });
   } catch (error) {

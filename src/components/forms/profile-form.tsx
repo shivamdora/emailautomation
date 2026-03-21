@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,6 +18,7 @@ export function ProfileForm({
 }: {
   defaultValues: z.infer<typeof profileSchema>;
 }) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const form = useForm<z.infer<typeof profileSchema>>({
     resolver: zodResolver(profileSchema),
@@ -40,6 +42,7 @@ export function ProfileForm({
       }
 
       toast.success(productContent.profile.form.successMessage);
+      router.refresh();
     });
   });
 
