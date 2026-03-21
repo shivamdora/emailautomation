@@ -1,3 +1,4 @@
+import type { TemplateListItem } from "@/lib/templates/gallery";
 import type { WorkflowStepInput } from "@/lib/workflows/definition";
 
 export const campaignCreatorSteps = [
@@ -8,6 +9,7 @@ export const campaignCreatorSteps = [
 ] as const;
 
 export type CampaignCreatorStepId = (typeof campaignCreatorSteps)[number]["id"];
+export type CampaignTemplateIntent = "primary" | "follow-up";
 
 export const sendWindowPresets = [
   { id: "business-hours", label: "Business hours", start: "09:00", end: "17:00" },
@@ -40,6 +42,33 @@ const DEFAULT_FOLLOWUP_STEP = {
 
 function normalizeValue(value: string | null | undefined) {
   return value?.trim() ?? "";
+}
+
+function isFollowUpTemplate(template: Pick<TemplateListItem, "category" | "tags" | "name" | "subject_template">) {
+  const category = normalizeValue(template.category).toLowerCase();
+  const searchText = [
+    template.name,
+    template.subject_template,
+    ...(template.tags ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    category === "follow-up" ||
+    searchText.includes("follow-up") ||
+    searchText.includes("follow up") ||
+    searchText.includes("followup")
+  );
+}
+
+export function matchesTemplateIntent(
+  template: Pick<TemplateListItem, "category" | "tags" | "name" | "subject_template">,
+  intent: CampaignTemplateIntent,
+) {
+  const followUpTemplate = isFollowUpTemplate(template);
+  return intent === "follow-up" ? followUpTemplate : !followUpTemplate;
 }
 
 function isStepBodyComplete(step: WorkflowStepInput | null | undefined) {

@@ -20,5 +20,5 @@ export async function POST(request: Request) {
 
   await processCrmPushJobs(workspace.workspaceId);
 
-  return NextResponse.redirect(new URL("/settings", request.url), { status: 303 });
+  return NextResponse.redirect(new URL("/settings/integrations", request.url), { status: 303 });
 }

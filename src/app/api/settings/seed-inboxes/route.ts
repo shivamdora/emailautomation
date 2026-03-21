@@ -28,7 +28,7 @@ export async function POST(request: Request) {
           : undefined,
     });
 
-    return NextResponse.redirect(new URL("/settings", request.url), { status: 303 });
+    return NextResponse.redirect(new URL("/settings/advanced", request.url), { status: 303 });
   }
 
   if (!provider || !emailAddress) {
@@ -42,5 +42,5 @@ export async function POST(request: Request) {
     status,
   });
 
-  return NextResponse.redirect(new URL("/settings", request.url), { status: 303 });
+  return NextResponse.redirect(new URL("/settings/advanced", request.url), { status: 303 });
 }

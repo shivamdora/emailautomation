@@ -2,13 +2,16 @@
 
 import { useDeferredValue, useMemo, useState } from "react";
 import Link from "next/link";
-import { Check, ChevronRight } from "lucide-react";
+import { Check, ChevronRight, Mail } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   buildLaunchChecklist,
+  matchesTemplateIntent,
+  type CampaignTemplateIntent,
   type CampaignCreatorStepId,
 } from "@/lib/campaigns/creator";
 import { creatorCopy } from "@/components/campaigns/campaign-creator-copy";
+import { EmailPreviewFrame } from "@/components/templates/email-preview-frame";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,17 +30,55 @@ type TemplateOption = {
   subject_template: string;
   body_template: string;
   body_html_template?: string | null;
+  preview_text?: string | null;
+  category?: string | null;
+  tags?: string[] | null;
 };
 
 export function getTemplateSnippet(template: {
   body_template: string;
   body_html_template?: string | null;
+  preview_text?: string | null;
 }) {
   if (template.body_html_template) {
     return "Designed HTML email ready to personalize.";
   }
 
-  return template.body_template.slice(0, 140) || "No preview available.";
+  return template.preview_text?.trim() || template.body_template.slice(0, 140) || "No preview available.";
+}
+
+function TemplateThumbnail({ template }: { template: TemplateOption }) {
+  if (template.body_html_template) {
+    return (
+      <div className="overflow-hidden rounded-[1.25rem] border border-white/70 bg-[linear-gradient(180deg,#edf3f6,#f9fbfd)]">
+        <EmailPreviewFrame
+          html={template.body_html_template}
+          maxCanvasHeight={196}
+          className="bg-[linear-gradient(180deg,#edf3f6,#f9fbfd)]"
+          frameClassName="shadow-[0_18px_36px_rgba(17,39,63,0.08)]"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid min-h-[12.25rem] gap-3 rounded-[1.25rem] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,249,253,0.92))] p-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="inline-flex size-10 items-center justify-center rounded-[1rem] border border-white/72 bg-[rgba(215,237,247,0.78)] text-accent-foreground">
+          <Mail className="size-4" />
+        </span>
+        <Badge variant="neutral">Text</Badge>
+      </div>
+      <div className="grid gap-2">
+        <p className="line-clamp-2 text-sm font-semibold tracking-[-0.02em] text-foreground">
+          {template.subject_template || "No subject yet"}
+        </p>
+        <p className="line-clamp-4 text-sm leading-6 text-muted-foreground">
+          {getTemplateSnippet(template)}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export function FieldError({ message }: { message?: string }) {
@@ -98,35 +139,48 @@ export function TemplateChooserDialog({
   templates,
   selectedTemplateId,
   onSelect,
+  intent,
+  title,
+  description,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   templates: TemplateOption[];
   selectedTemplateId: string;
   onSelect: (templateId: string) => void;
+  intent: CampaignTemplateIntent;
+  title: string;
+  description: string;
 }) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const filteredTemplates = useMemo(() => {
     const normalizedQuery = deferredQuery.trim().toLowerCase();
+    const templatesForIntent = templates.filter((template) => matchesTemplateIntent(template, intent));
 
     if (!normalizedQuery) {
-      return templates;
+      return templatesForIntent;
     }
 
-    return templates.filter((template) =>
-      [template.name, template.subject_template]
+    return templatesForIntent.filter((template) =>
+      [
+        template.name,
+        template.subject_template,
+        template.preview_text ?? "",
+        template.category ?? "",
+        ...(template.tags ?? []),
+      ]
         .filter(Boolean)
         .some((value) => value.toLowerCase().includes(normalizedQuery)),
     );
-  }, [deferredQuery, templates]);
+  }, [deferredQuery, intent, templates]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[86vh] overflow-hidden p-0">
         <DialogHeader className="border-b border-white/70 px-6 py-5">
-          <DialogTitle>{creatorCopy.start.templateDialogTitle}</DialogTitle>
-          <DialogDescription>{creatorCopy.start.templateDialogDescription}</DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 overflow-y-auto px-6 py-5">
           <Input
@@ -153,6 +207,7 @@ export function TemplateChooserDialog({
                         : "glass-control hover:-translate-y-0.5 hover:border-white/90 hover:bg-white/80 hover:shadow-[0_18px_32px_rgba(17,39,63,0.12)]",
                     )}
                   >
+                    <TemplateThumbnail template={template} />
                     <div className="flex items-start justify-between gap-3">
                       <div className="grid gap-1">
                         <p className="text-base font-semibold tracking-[-0.03em] text-foreground">
@@ -160,9 +215,14 @@ export function TemplateChooserDialog({
                         </p>
                         <p className="text-sm text-muted-foreground">{template.subject_template}</p>
                       </div>
-                      <Badge variant={template.body_html_template ? "success" : "neutral"}>
-                        {template.body_html_template ? "HTML" : "Text"}
-                      </Badge>
+                      <div className="flex flex-col items-end gap-2">
+                        <Badge variant={template.body_html_template ? "success" : "neutral"}>
+                          {template.body_html_template ? "HTML" : "Text"}
+                        </Badge>
+                        {template.category ? (
+                          <Badge variant="neutral">{template.category}</Badge>
+                        ) : null}
+                      </div>
                     </div>
                     <p className="text-sm leading-6 text-muted-foreground">
                       {getTemplateSnippet(template)}
@@ -181,7 +241,9 @@ export function TemplateChooserDialog({
                 {creatorCopy.start.templateEmptyTitle}
               </p>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                {creatorCopy.start.templateEmptyDescription}
+                {intent === "follow-up"
+                  ? "No follow-up templates match this search yet. Add one in Templates or keep the default follow-up."
+                  : creatorCopy.start.templateEmptyDescription}
               </p>
               <div className="mt-4 flex justify-center">
                 <Button asChild variant="outline">

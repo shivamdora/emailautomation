@@ -58,12 +58,13 @@ Required secrets:
 
 ## Cron schedule
 
-- Every 5 minutes: `send-due-messages`
-- Every 5 minutes: `sync-replies`
+- Every 1 minute: `send-due-messages`
+- Every 1 minute: `sync-replies`
 - Every 15 minutes: `crm-sync`
 - Every `SEED_MONITOR_INTERVAL_MINUTES`: `seed-monitor`
 
 Pass `x-cron-secret: <SUPABASE_CRON_VERIFY_SECRET>` in each scheduled invocation.
+`send-due-messages` is the authoritative campaign queue worker. Step 1 and follow-up timing are both driven from this 1-minute cadence.
 
 ## Google sign-in via Supabase
 

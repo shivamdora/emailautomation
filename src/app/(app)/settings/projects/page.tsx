@@ -1,42 +1,16 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/layout/page-header";
+import { ProjectAvatar } from "@/components/projects/project-avatar";
 import { ProjectLogoForm } from "@/components/projects/project-logo-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { getProjectMonogram } from "@/lib/projects/shared";
 import { listWorkspaceProjectMailboxRegistry } from "@/services/project-service";
 
 type ProjectsSettingsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
-
-function ProjectAvatar({
-  name,
-  brandName,
-  logoUrl,
-}: {
-  name: string;
-  brandName?: string | null;
-  logoUrl?: string | null;
-}) {
-  if (logoUrl) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={logoUrl}
-        alt={name}
-        className="size-14 rounded-[1.25rem] border border-white/75 object-cover shadow-[0_16px_28px_rgba(17,39,63,0.1)]"
-      />
-    );
-  }
-
-  return (
-    <span className="flex size-14 items-center justify-center rounded-[1.25rem] border border-white/78 bg-[linear-gradient(180deg,rgba(215,237,247,0.92),rgba(255,255,255,0.84))] font-mono text-sm uppercase tracking-[0.2em] text-accent-foreground shadow-[0_16px_28px_rgba(17,39,63,0.08)]">
-      {getProjectMonogram({ name, brand_name: brandName ?? null })}
-    </span>
-  );
-}
 
 function getBannerMessage(params: Record<string, string | string[] | undefined>) {
   const status = typeof params.status === "string" ? params.status : null;
@@ -56,9 +30,9 @@ function getBannerMessage(params: Record<string, string | string[] | undefined>)
     };
   }
 
-      if (status === "error") {
-        return {
-          tone: "error" as const,
+  if (status === "error") {
+    return {
+      tone: "error" as const,
       text: message || "Project update failed.",
     };
   }
@@ -79,6 +53,11 @@ export default async function ProjectsSettingsPage({ searchParams }: ProjectsSet
         eyebrow={workspace.workspaceName}
         title="Projects"
         description="Create projects, upload brand assets, and keep sender details separated so each outbound motion has its own identity."
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link href="/settings/sending">Open Sending</Link>
+          </Button>
+        }
       />
 
       {banner ? (

@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { productContent } from "@/content/product";
 import { buildCampaignWizardInitialValues } from "@/lib/campaigns/wizard-defaults";
 import { getWorkspaceContext } from "@/lib/db/workspace";
+import type { TemplateListItem } from "@/lib/templates/gallery";
 import { listTemplates } from "@/services/campaign-service";
 import { getWorkspaceGmailAccounts } from "@/services/gmail-service";
 import { listContacts } from "@/services/import-service";
@@ -24,13 +25,7 @@ export default async function NewCampaignPage({ searchParams }: NewCampaignPageP
   ]);
   const gmailAccounts = rawGmailAccounts as Array<{ id: string; email_address: string }>;
   const contacts = rawContacts;
-  const templates = rawTemplates as Array<{
-    id: string;
-    name: string;
-    subject_template: string;
-    body_template: string;
-    body_html_template?: string | null;
-  }>;
+  const templates = rawTemplates as TemplateListItem[];
   const selectedTemplateId = typeof params.templateId === "string" ? params.templateId : null;
 
   return (

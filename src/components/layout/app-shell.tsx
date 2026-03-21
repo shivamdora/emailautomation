@@ -196,7 +196,7 @@ export function AppShell({
             {isDesktopSidebarCollapsed ? (
               <div className="mt-5 grid justify-center gap-3">
                 <Link
-                  href="/profile"
+                  href="/settings/sending"
                   aria-label={productContent.profile.gmailCard.connectLabel}
                   title={productContent.profile.gmailCard.connectLabel}
                   className="glass-chip flex size-12 items-center justify-center rounded-[1.25rem] text-sidebar-foreground transition hover:-translate-y-0.5 hover:shadow-[0_18px_34px_rgba(17,39,63,0.12)]"

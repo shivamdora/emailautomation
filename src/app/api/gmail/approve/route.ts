@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { approveGmailAccount } from "@/services/gmail-service";
 import { logActivity } from "@/services/activity-log-service";
+import { emitWorkspaceIntegrationEvent } from "@/services/integration-event-service";
 
 export async function POST(request: Request) {
   const workspace = await getWorkspaceContext();
@@ -36,5 +37,17 @@ export async function POST(request: Request) {
     metadata: { approvalNote: approvalNote || null },
   });
 
-  return NextResponse.redirect(new URL("/settings", request.url));
+  if (approvalStatus === "approved") {
+    await emitWorkspaceIntegrationEvent({
+      workspaceId: workspace.workspaceId,
+      eventType: "mailbox.approved",
+      summary: "A sender mailbox was approved.",
+      metadata: {
+        gmailAccountId,
+        approvalNote: approvalNote || null,
+      },
+    });
+  }
+
+  return NextResponse.redirect(new URL("/settings/sending", request.url), { status: 303 });
 }

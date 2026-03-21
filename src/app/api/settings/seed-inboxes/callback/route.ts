@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     const state = url.searchParams.get("state");
 
     if (!code || !state) {
-      return NextResponse.redirect(new URL("/settings?seedInbox=missing-code", request.url));
+      return NextResponse.redirect(new URL("/settings/advanced?seedInbox=missing-code", request.url));
     }
 
     const payload = await verifyOAuthState<{
@@ -32,12 +32,12 @@ export async function GET(request: Request) {
       tokenExpiry: tokens.tokenExpiry,
     });
 
-    return NextResponse.redirect(new URL("/settings?seedInbox=connected", request.url));
+    return NextResponse.redirect(new URL("/settings/advanced?seedInbox=connected", request.url));
   } catch (error) {
     console.error("Seed inbox callback failed", error);
     const message = error instanceof Error ? error.message : "seed-inbox-connect-failed";
     return NextResponse.redirect(
-      new URL(`/settings?seedInbox=error&message=${encodeURIComponent(message.slice(0, 160))}`, request.url),
+      new URL(`/settings/advanced?seedInbox=error&message=${encodeURIComponent(message.slice(0, 160))}`, request.url),
     );
   }
 }

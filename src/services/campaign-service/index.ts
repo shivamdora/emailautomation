@@ -23,6 +23,12 @@ import { assertWorkspaceCanCreateCampaign, refreshWorkspaceUsageCounters } from 
 import { getMailboxAccessTokenForAccount, sendWithMailboxProvider } from "@/services/gmail-service";
 import { instrumentHtmlForTracking, recordMessageEvent } from "@/services/telemetry-service";
 import { getSeedTemplateDefinitions } from "@/services/template-seed-service";
+import {
+  cancelPendingCampaignJobs,
+  reconcileCampaignJobs,
+  requeueFailedCampaignContact,
+} from "@/services/campaign-send-queue-service";
+import { assertHunterPreLaunchGuardrails } from "@/services/hunter-service";
 
 type CampaignStepInput = {
   subject: string;
@@ -599,6 +605,8 @@ type DueCampaignContact = {
   outbound_messages?: Array<{ step_number: number }> | null;
 };
 
+// Legacy helper kept temporarily while the queue rollout settles; campaign delivery now runs through campaign_send_jobs.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function processCampaignContact(item: DueCampaignContact, options?: { ignoreSendWindow?: boolean }) {
   const supabase = createAdminSupabaseClient();
   const campaign = item.campaign;
@@ -801,6 +809,10 @@ export async function createCampaign(input: {
 }) {
   requireSupabaseConfiguration();
   await assertWorkspaceCanCreateCampaign(input.workspaceId);
+  await assertHunterPreLaunchGuardrails({
+    workspaceId: input.workspaceId,
+    targetContactIds: input.targetContactIds,
+  });
   const workflowDefinition = normalizeWorkflowDefinition(input.workflowDefinition);
 
   const supabase = createAdminSupabaseClient();
@@ -868,6 +880,7 @@ export async function createCampaign(input: {
     })),
   );
 
+  await reconcileCampaignJobs(campaign.id);
   await refreshWorkspaceUsageCounters(input.workspaceId);
 
   return { id: campaign.id, launched: true };
@@ -887,6 +900,10 @@ export async function updateCampaign(input: {
   workflowDefinition: { version?: number; steps?: WorkflowStepInput[] };
 }) {
   requireSupabaseConfiguration();
+  await assertHunterPreLaunchGuardrails({
+    workspaceId: input.workspaceId,
+    targetContactIds: input.targetContactIds,
+  });
   const workflowDefinition = normalizeWorkflowDefinition(input.workflowDefinition);
 
   const supabase = createAdminSupabaseClient();
@@ -991,6 +1008,9 @@ export async function updateCampaign(input: {
     }
 
     if (!["replied", "followup_sent", "unsubscribed"].includes(contact.status)) {
+      await cancelPendingCampaignJobs(contact.id, {
+        reason: "Removed during campaign edit",
+      });
       await supabase
         .from("campaign_contacts")
         .update({
@@ -1018,6 +1038,7 @@ export async function updateCampaign(input: {
     );
   }
 
+  await reconcileCampaignJobs(input.campaignId);
   return { id: input.campaignId, updated: true };
 }
 
@@ -1070,23 +1091,15 @@ export async function pauseCampaign(
     await refreshWorkspaceUsageCounters(campaign.workspace_id);
   }
 
+  if (status === "active") {
+    await reconcileCampaignJobs(campaignId);
+  }
+
   return { campaignId, status };
 }
 
 export async function markFailedContactForResend(campaignContactId: string) {
-  requireSupabaseConfiguration();
-
-  const supabase = createAdminSupabaseClient();
-  await supabase
-    .from("campaign_contacts")
-    .update({
-      status: "queued",
-      next_due_at: new Date().toISOString(),
-      error_message: null,
-    })
-    .eq("id", campaignContactId);
-
-  return { campaignContactId, status: "queued" };
+  return requeueFailedCampaignContact(campaignContactId);
 }
 
 export async function sendCampaignNow(campaignId: string, workspaceId: string, projectId: string) {
@@ -1108,96 +1121,37 @@ export async function sendCampaignNow(campaignId: string, workspaceId: string, p
   if (!campaign) {
     throw new Error("Campaign not found.");
   }
+  await reconcileCampaignJobs(campaignId);
 
-  let dueContactsResult = await supabase
-    .from("campaign_contacts")
-    .select(
-      `
-      id,
-      campaign_id,
-      contact_id,
-      current_step,
-      current_node_key,
-      branch_history_jsonb,
-      status,
-      failed_attempts,
-      next_due_at,
-      last_thread_id,
-      contact:contacts(email, first_name, last_name, company, website, job_title, custom_fields_jsonb, unsubscribed_at),
-      campaign:campaigns(
-        id,
-        workspace_id,
-        project_id,
-        name,
-        status,
-        gmail_account_id,
-        workflow_definition_jsonb,
-        daily_send_limit,
-        send_window_start,
-        send_window_end,
-        timezone,
-        campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days)
-      ),
-      outbound_messages(step_number)
-    `,
-    )
-    .eq("campaign_id", campaignId)
-    .in("status", ["queued", "followup_due", "sent"])
-    .lte("next_due_at", new Date().toISOString())
-    .order("next_due_at", { ascending: true });
+  const functionUrl = `${env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-due-messages`;
+  const response = await fetch(functionUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY ?? ""}`,
+      ...(env.SUPABASE_CRON_VERIFY_SECRET
+        ? { "x-cron-secret": env.SUPABASE_CRON_VERIFY_SECRET }
+        : {}),
+    },
+    body: JSON.stringify({
+      campaignId,
+      maxJobs: 250,
+      ignoreSendWindow: true,
+    }),
+  });
+  const payload = (await response.json().catch(() => null)) as
+    | { processed?: number; error?: string }
+    | null;
 
-  if (isCampaignSchemaResult(dueContactsResult)) {
-    dueContactsResult = await supabase
-      .from("campaign_contacts")
-      .select(
-        `
-        id,
-        campaign_id,
-        contact_id,
-        current_step,
-        status,
-        failed_attempts,
-        next_due_at,
-        last_thread_id,
-        contact:contacts(email, first_name, last_name, company, website, job_title, custom_fields_jsonb, unsubscribed_at),
-        campaign:campaigns(
-          id,
-          workspace_id,
-          project_id,
-          name,
-          status,
-          gmail_account_id,
-          daily_send_limit,
-          send_window_start,
-          send_window_end,
-          timezone,
-          campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days)
-        ),
-        outbound_messages(step_number)
-      `,
-      )
-      .eq("campaign_id", campaignId)
-      .in("status", ["queued", "followup_due", "sent"])
-      .lte("next_due_at", new Date().toISOString())
-      .order("next_due_at", { ascending: true });
+  if (!response.ok) {
+    throw new Error(payload?.error ?? "Failed to trigger the campaign send worker.");
   }
 
-  const { data, error } = dueContactsResult;
-
-  if (error) {
-    throw error;
-  }
-
-  let processed = 0;
-
-  for (const item of (data ?? []) as DueCampaignContact[]) {
-    const result = await processCampaignContact(item, { ignoreSendWindow: true });
-    if (result.processed) {
-      processed += 1;
-    }
-  }
-
-  return { campaignId, processed };
+  return {
+    campaignId,
+    processed: Number(payload?.processed ?? 0),
+  };
 }
 
 export function scheduleFollowup(sentAt: string) {

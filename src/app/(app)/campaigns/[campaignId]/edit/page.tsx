@@ -2,6 +2,7 @@ import { CampaignWizard } from "@/components/campaigns/campaign-wizard";
 import { PageHeader } from "@/components/layout/page-header";
 import { productContent } from "@/content/product";
 import { getWorkspaceContext } from "@/lib/db/workspace";
+import type { TemplateListItem } from "@/lib/templates/gallery";
 import { buildWorkflowDefinitionFromStoredSteps, normalizeWorkflowDefinition } from "@/lib/workflows/definition";
 import { getCampaignForEditing, listTemplates } from "@/services/campaign-service";
 import { getWorkspaceGmailAccounts } from "@/services/gmail-service";
@@ -24,13 +25,7 @@ export default async function EditCampaignPage({
     listTemplates(workspace.workspaceId, workspace.activeProjectId),
   ]);
   const gmailAccounts = rawGmailAccounts as Array<{ id: string; email_address: string }>;
-  const templates = rawTemplates as Array<{
-    id: string;
-    name: string;
-    subject_template: string;
-    body_template: string;
-    body_html_template?: string | null;
-  }>;
+  const templates = rawTemplates as TemplateListItem[];
   const workflowDefinition = normalizeWorkflowDefinition(campaign.workflow_definition_jsonb);
   const fallbackWorkflow = buildWorkflowDefinitionFromStoredSteps(campaign.campaign_steps ?? []);
   const resolvedWorkflow = workflowDefinition.steps.length ? workflowDefinition : fallbackWorkflow;

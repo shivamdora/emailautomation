@@ -603,7 +603,7 @@ export const productContent: ProductContent = {
     chartTitle: "Reply rate by campaign",
     checklistTitle: "Launch checklist",
     checklist: [
-      "Connect a Gmail mailbox from Profile.",
+      "Connect a Gmail mailbox from Settings > Sending.",
       "Import contacts from a CSV, XLSX, or public Google Sheet.",
       "Save at least one reusable template.",
       "Launch a campaign and keep this page open while sends and replies sync.",
@@ -848,8 +848,8 @@ export const productContent: ProductContent = {
       senderEmptyLabel: "No mailbox connected",
       senderHelperTitle: "Connect Gmail before launch",
       senderHelperDescription:
-        "This project does not have a connected Gmail mailbox yet. Connect one from Profile before you launch or send.",
-      senderHelperCta: "Open Profile",
+        "This project does not have a connected Gmail mailbox yet. Connect one from Settings > Sending before you launch or send.",
+      senderHelperCta: "Open Settings",
       targetContactsLabel: "Target contacts",
       targetContactsSummary: (count) => `${count} selected across the full list`,
       searchContactsPlaceholder: "Search by email, name, company, title, or tag",
@@ -948,7 +948,7 @@ export const productContent: ProductContent = {
     header: {
       eyebrow: "Profile",
       title: "Personal settings",
-      description: "Keep your profile current, review project branding, and connect the Gmail mailboxes you send from.",
+      description: "Keep your personal identity current, then jump into sender setup and project branding from Settings.",
     },
     banners: {
       connected: "Gmail mailbox connected successfully.",

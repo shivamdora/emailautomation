@@ -1,5 +1,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SignJWT } from "https://esm.sh/jose@6.2.1";
+import {
+  computeNextScheduledSendAt,
+  computeNextWindowStartAt,
+  computeRetryScheduledAt,
+  getDateKeyInTimeZone,
+  getDayBoundsInTimeZone,
+  isTerminalCampaignContactStatus,
+  isWithinAllowedSendDay,
+} from "../../../src/lib/campaigns/send-queue-shared.ts";
 import { config } from "../shared/config.ts";
 import { decryptToken, encryptToken } from "../shared/crypto.ts";
 import { enqueueCrmWritebackJobs } from "../shared/crm.ts";
@@ -7,6 +16,74 @@ import { gmailRefreshAccessToken, gmailSend } from "../shared/gmail.ts";
 import { json } from "../shared/response.ts";
 
 const supabase = createClient(config.supabaseUrl, config.supabaseServiceRoleKey);
+const MAX_JOB_ATTEMPTS = 5;
+
+type WorkflowStep = {
+  key: string;
+  stepNumber: number;
+  name: string;
+  waitDays: number;
+  branchCondition: string;
+  onMatch: string;
+  onNoMatch: string;
+  subject: string;
+  mode: string;
+  body: string;
+  bodyHtml: string;
+};
+
+type ReservedJobRecord = {
+  id: string;
+  campaign_id: string;
+  campaign_contact_id: string;
+  step_number: number;
+  status: string;
+  scheduled_for: string;
+  attempt_count: number;
+  reservation_token?: string | null;
+  campaign_contact?: {
+    id: string;
+    contact_id: string;
+    status: string;
+    current_step: number;
+    failed_attempts: number;
+    last_thread_id?: string | null;
+    last_message_id?: string | null;
+    contact?: {
+      email?: string | null;
+      first_name?: string | null;
+      last_name?: string | null;
+      company?: string | null;
+      website?: string | null;
+      job_title?: string | null;
+      custom_fields_jsonb?: Record<string, unknown> | null;
+      unsubscribed_at?: string | null;
+    } | null;
+    outbound_messages?: Array<{
+      id: string;
+      step_number: number;
+      status?: string | null;
+      sent_at?: string | null;
+      gmail_message_id?: string | null;
+      gmail_thread_id?: string | null;
+    }> | null;
+  } | null;
+  campaign?: {
+    id: string;
+    workspace_id: string;
+    project_id: string;
+    name: string;
+    status: string;
+    gmail_account_id: string;
+    workflow_definition_jsonb?: { steps?: Array<Record<string, unknown>> } | null;
+    daily_send_limit: number;
+    send_window_start: string;
+    send_window_end: string;
+    timezone: string;
+    allowed_send_days?: string[] | null;
+    campaign_steps?: Array<Record<string, unknown>> | null;
+  } | null;
+};
 
 function verifyCron(request: Request) {
   const secret = request.headers.get("x-cron-secret");
@@ -86,28 +163,29 @@ async function instrumentHtmlForTracking(input: {
     });
     trackedHtml = trackedHtml.replace(
       match,
-      `href=${quote}${appUrl}/api/track/click?token=${encodeURIComponent(clickToken)}${quote}`,
+      `href=${quote}${Deno.env.get("NEXT_PUBLIC_APP_URL") ?? "http://localhost:3000"}/api/track/click?token=${encodeURIComponent(clickToken)}${quote}`,
     );
   }
 
   return `${trackedHtml}${openPixel}`;
 }
 
-function isWithinSendWindow(timezone: string, start: string, end: string) {
+function isWithinSendWindow(date: Date, timezone: string, start: string, end: string) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: timezone,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
   })
-    .formatToParts(new Date())
-    .reduce<Record<string, string>>((acc, part) => {
+    .formatToParts(date)
+    .reduce<Record<string, string>>((accumulator, part) => {
       if (part.type !== "literal") {
-        acc[part.type] = part.value;
+        accumulator[part.type] = part.value;
       }
-      return acc;
+
+      return accumulator;
     }, {});
-  const currentMinutes = Number(parts.hour) * 60 + Number(parts.minute);
+  const currentMinutes = Number(parts.hour ?? "0") * 60 + Number(parts.minute ?? "0");
   const [startHour, startMinute] = start.split(":").map(Number);
   const [endHour, endMinute] = end.split(":").map(Number);
   return currentMinutes >= startHour * 60 + startMinute && currentMinutes <= endHour * 60 + endMinute;
@@ -143,11 +221,11 @@ function normalizeWorkflowDefinition(definition: unknown, storedSteps: Array<Rec
     mode: String(step.mode ?? "text"),
     body: String(step.body ?? ""),
     bodyHtml: String(step.bodyHtml ?? ""),
-  }));
+  })) as WorkflowStep[];
 }
 
 function resolveWorkflowAdvance(
-  workflowSteps: Array<Record<string, unknown>>,
+  workflowSteps: WorkflowStep[],
   stepNumber: number,
   events: Array<{ event_type: string; metadata?: { stepNumber?: number | string | null } | null }>,
 ) {
@@ -166,16 +244,8 @@ function resolveWorkflowAdvance(
 
   if (condition === "time") {
     return String(currentStep.onMatch ?? "next_step") === "next_step"
-      ? {
-          action: "advance",
-          nextStep,
-          matched: true,
-          reason: "time_elapsed",
-        }
-      : {
-          action: "exit",
-          exitReason: "time_elapsed_exit",
-        };
+      ? { action: "advance", nextStep, matched: true, reason: "time_elapsed" }
+      : { action: "exit", exitReason: "time_elapsed_exit" };
   }
 
   const matched = events.some(
@@ -183,7 +253,9 @@ function resolveWorkflowAdvance(
       event.event_type === (condition === "opened" ? "opened" : "clicked") &&
       Number(event.metadata?.stepNumber ?? 0) === stepNumber,
   );
-  const outcome = matched ? String(currentStep.onMatch ?? "next_step") : String(currentStep.onNoMatch ?? "next_step");
+  const outcome = matched
+    ? String(currentStep.onMatch ?? "next_step")
+    : String(currentStep.onNoMatch ?? "next_step");
 
   return outcome === "next_step"
     ? {
@@ -257,7 +329,16 @@ async function getWorkspaceSendState(workspaceId: string) {
       })
       .eq("campaign_contact.campaign.workspace_id", workspaceId)
       .eq("status", "sent")
-      .gte("sent_at", new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())).toISOString()),
+      .gte(
+        "sent_at",
+        new Date(
+          Date.UTC(
+            new Date().getUTCFullYear(),
+            new Date().getUTCMonth(),
+            new Date().getUTCDate(),
+          ),
+        ).toISOString(),
+      ),
     supabase
       .from("outbound_messages")
       .select("id, campaign_contact:campaign_contacts!inner(campaign:campaigns!inner(workspace_id))", {
@@ -266,7 +347,10 @@ async function getWorkspaceSendState(workspaceId: string) {
       })
       .eq("campaign_contact.campaign.workspace_id", workspaceId)
       .eq("status", "sent")
-      .gte("sent_at", new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString()),
+      .gte(
+        "sent_at",
+        new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString(),
+      ),
   ]);
   const planKey = billingAccount.data?.plan_key ?? "internal_mvp";
   const planLimits = await supabase
@@ -284,28 +368,363 @@ async function getWorkspaceSendState(workspaceId: string) {
   };
 }
 
-Deno.serve(async (request) => {
-  if (!verifyCron(request)) {
-    return json({ error: "Unauthorized" }, { status: 401 });
+async function updateQueueRun(
+  runId: string | null,
+  input: {
+    status: "success" | "partial" | "error";
+    processedCount: number;
+    errorCount: number;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  if (!runId) {
+    return;
   }
 
-  const { data: dueContacts, error } = await supabase
+  await supabase
+    .from("campaign_queue_runs")
+    .update({
+      status: input.status,
+      finished_at: new Date().toISOString(),
+      processed_count: input.processedCount,
+      error_count: input.errorCount,
+      metadata: input.metadata ?? {},
+    })
+    .eq("id", runId);
+}
+
+async function startQueueRun(metadata: Record<string, unknown>) {
+  const { data, error } = await supabase
+    .from("campaign_queue_runs")
+    .insert({
+      worker_name: "send-due-messages",
+      status: "success",
+      started_at: new Date().toISOString(),
+      metadata,
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to start queue run", error);
+    return null;
+  }
+
+  return (data as { id?: string } | null)?.id ?? null;
+}
+
+async function syncCampaignContactNextDueAt(campaignContactId: string) {
+  const { data, error } = await supabase
+    .from("campaign_send_jobs")
+    .select("scheduled_for")
+    .eq("campaign_contact_id", campaignContactId)
+    .in("status", ["pending", "reserved"])
+    .order("scheduled_for", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  const scheduledFor = (data as { scheduled_for?: string | null } | null)?.scheduled_for ?? null;
+  await supabase
     .from("campaign_contacts")
-    .select(`
+    .update({ next_due_at: scheduledFor })
+    .eq("id", campaignContactId);
+
+  return scheduledFor;
+}
+
+async function updateJob(jobId: string, values: Record<string, unknown>) {
+  const { error } = await supabase.from("campaign_send_jobs").update(values).eq("id", jobId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function cancelCurrentJob(input: {
+  jobId: string;
+  campaignContactId: string;
+  reason: string;
+  campaignContactStatus?: string;
+  currentStep?: number;
+}) {
+  const now = new Date().toISOString();
+  await updateJob(input.jobId, {
+    status: "canceled",
+    canceled_at: now,
+    processed_at: now,
+    last_error: input.reason,
+    reservation_token: null,
+  });
+
+  if (input.campaignContactStatus) {
+    await supabase
+      .from("campaign_contacts")
+      .update({
+        status: input.campaignContactStatus,
+        current_step: input.currentStep ?? undefined,
+        next_due_at: null,
+        error_message: null,
+      })
+      .eq("id", input.campaignContactId);
+  } else {
+    await syncCampaignContactNextDueAt(input.campaignContactId);
+  }
+}
+
+async function releaseReservedJob(input: {
+  jobId: string;
+  campaignContactId: string;
+  scheduledFor: string;
+  lastError?: string | null;
+}) {
+  await updateJob(input.jobId, {
+    status: "pending",
+    scheduled_for: input.scheduledFor,
+    reserved_at: null,
+    reservation_token: null,
+    last_error: input.lastError ?? null,
+  });
+  await supabase
+    .from("campaign_contacts")
+    .update({
+      next_due_at: input.scheduledFor,
+      error_message: input.lastError ?? null,
+    })
+    .eq("id", input.campaignContactId);
+}
+
+async function queueNextStep(input: {
+  campaign: NonNullable<ReservedJobRecord["campaign"]>;
+  campaignContact: NonNullable<ReservedJobRecord["campaign_contact"]>;
+  nextStep: WorkflowStep;
+  scheduledFor: string;
+}) {
+  const existing = await supabase
+    .from("campaign_send_jobs")
+    .select("id, status")
+    .eq("campaign_contact_id", input.campaignContact.id)
+    .eq("step_number", input.nextStep.stepNumber)
+    .maybeSingle();
+
+  if (existing.error) {
+    throw existing.error;
+  }
+
+  if ((existing.data as { status?: string | null } | null)?.status === "sent") {
+    await syncCampaignContactNextDueAt(input.campaignContact.id);
+    return;
+  }
+
+  const payload = {
+    workspace_id: input.campaign.workspace_id,
+    project_id: input.campaign.project_id,
+    campaign_id: input.campaign.id,
+    campaign_contact_id: input.campaignContact.id,
+    step_number: input.nextStep.stepNumber,
+    scheduled_for: input.scheduledFor,
+    status: "pending",
+    reserved_at: null,
+    processed_at: null,
+    canceled_at: null,
+    reservation_token: null,
+    attempt_count: 0,
+    last_error: null,
+  };
+
+  if (existing.data) {
+    await supabase
+      .from("campaign_send_jobs")
+      .update(payload)
+      .eq("id", (existing.data as { id: string }).id);
+  } else {
+    await supabase.from("campaign_send_jobs").insert(payload);
+  }
+
+  await supabase
+    .from("campaign_contacts")
+    .update({
+      status: input.nextStep.stepNumber > 1 ? "followup_due" : "queued",
+      current_step: input.nextStep.stepNumber,
+      next_due_at: input.scheduledFor,
+      error_message: null,
+    })
+    .eq("id", input.campaignContact.id);
+}
+
+async function upsertUnsubscribeRecord(input: {
+  workspaceId: string;
+  contactId: string;
+  email: string;
+  token: string;
+}) {
+  await supabase.from("unsubscribes").upsert({
+    workspace_id: input.workspaceId,
+    contact_id: input.contactId,
+    email: input.email,
+    token_hash: await hashToken(input.token),
+  });
+}
+
+function getRetryDelayMinutes(attemptCount: number) {
+  if (attemptCount <= 1) {
+    return 5;
+  }
+
+  if (attemptCount === 2) {
+    return 15;
+  }
+
+  if (attemptCount === 3) {
+    return 30;
+  }
+
+  return 60;
+}
+
+function isPermanentSendError(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("pending workspace approval") ||
+    normalized.includes("missing refresh token") ||
+    normalized.includes("missing oauth connection") ||
+    normalized.includes("invalid_grant") ||
+    normalized.includes("insufficient permissions") ||
+    normalized.includes("mailbox connection not found")
+  );
+}
+
+function buildRenderedContent(input: {
+  step: WorkflowStep;
+  contact: NonNullable<NonNullable<ReservedJobRecord["campaign_contact"]>["contact"]>;
+  unsubscribeLink: string;
+}) {
+  const renderedSubject = renderTemplate(input.step.subject, input.contact);
+  const renderedTextBody = renderTemplate(input.step.body, input.contact);
+  const renderedHtmlBody =
+    input.step.mode === "html" && input.step.bodyHtml
+      ? renderTemplate(input.step.bodyHtml, input.contact)
+      : `${renderedTextBody.replace(/\n/g, "<br />")}<br /><br /><a href="${input.unsubscribeLink}">Unsubscribe</a>`;
+  const textBody = renderedTextBody.includes("Unsubscribe")
+    ? renderedTextBody
+    : `${renderedTextBody}\n\nUnsubscribe: ${input.unsubscribeLink}`;
+
+  return {
+    subject: renderedSubject,
+    bodyText: textBody,
+    bodyHtml: renderedHtmlBody.includes("Unsubscribe")
+      ? renderedHtmlBody
+      : `${renderedHtmlBody}<br /><br /><a href="${input.unsubscribeLink}">Unsubscribe</a>`,
+    snippet: renderedTextBody.slice(0, 120),
+  };
+}
+
+async function ensureOutboundMessageRecord(campaignContactId: string, stepNumber: number) {
+  const existingResult = await supabase
+    .from("outbound_messages")
+    .select("id, status, sent_at, gmail_message_id, gmail_thread_id")
+    .eq("campaign_contact_id", campaignContactId)
+    .eq("step_number", stepNumber)
+    .maybeSingle();
+
+  if (existingResult.error) {
+    throw existingResult.error;
+  }
+
+  const existing = existingResult.data as
+    | {
+        id: string;
+        status?: string | null;
+        sent_at?: string | null;
+        gmail_message_id?: string | null;
+        gmail_thread_id?: string | null;
+      }
+    | null;
+
+  if (existing) {
+    return existing;
+  }
+
+  const { data, error } = await supabase
+    .from("outbound_messages")
+    .insert({
+      campaign_contact_id: campaignContactId,
+      step_number: stepNumber,
+      status: "queued",
+    })
+    .select("id, status, sent_at, gmail_message_id, gmail_thread_id")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as {
+    id: string;
+    status?: string | null;
+    sent_at?: string | null;
+    gmail_message_id?: string | null;
+    gmail_thread_id?: string | null;
+  };
+}
+
+async function getCampaignDaySendCount(campaignId: string, timezone: string, baseAt: string) {
+  const bounds = getDayBoundsInTimeZone(baseAt, timezone);
+  const { count, error } = await supabase
+    .from("outbound_messages")
+    .select("id, campaign_contact:campaign_contacts!inner(campaign_id)", { count: "exact", head: true })
+    .eq("campaign_contact.campaign_id", campaignId)
+    .eq("status", "sent")
+    .gte("sent_at", bounds.startIso)
+    .lt("sent_at", bounds.endIso);
+
+  if (error) {
+    throw error;
+  }
+
+  return count ?? 0;
+}
+
+async function loadReservedJobs(jobIds: string[]) {
+  const { data, error } = await supabase
+    .from("campaign_send_jobs")
+    .select(
+      `
       id,
       campaign_id,
-      contact_id,
-      current_step,
-      current_node_key,
-      branch_history_jsonb,
+      campaign_contact_id,
+      step_number,
       status,
-      failed_attempts,
-      next_due_at,
-      last_thread_id,
-      contact:contacts(email, first_name, company, website, custom_fields_jsonb, unsubscribed_at),
+      scheduled_for,
+      attempt_count,
+      reservation_token,
+      campaign_contact:campaign_contacts(
+        id,
+        contact_id,
+        status,
+        current_step,
+        failed_attempts,
+        last_thread_id,
+        last_message_id,
+        contact:contacts(
+          email,
+          first_name,
+          last_name,
+          company,
+          website,
+          job_title,
+          custom_fields_jsonb,
+          unsubscribed_at
+        ),
+        outbound_messages(id, step_number, status, sent_at, gmail_message_id, gmail_thread_id)
+      ),
       campaign:campaigns(
         id,
         workspace_id,
+        project_id,
         name,
         status,
         gmail_account_id,
@@ -314,263 +733,591 @@ Deno.serve(async (request) => {
         send_window_start,
         send_window_end,
         timezone,
-        campaign_steps(step_number, subject_template, body_template, body_html_template, wait_days)
-      ),
-      outbound_messages(step_number)
-    `)
-    .in("status", ["queued", "followup_due", "sent"])
-    .lte("next_due_at", new Date().toISOString())
-    .order("next_due_at", { ascending: true })
-    .limit(config.defaultPerMinuteThrottle);
+        allowed_send_days,
+        campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days)
+      )
+    `,
+    )
+    .in("id", jobIds)
+    .order("scheduled_for", { ascending: true });
 
   if (error) {
-    return json({ error: error.message }, { status: 500 });
+    throw error;
   }
 
+  return (data as ReservedJobRecord[] | null) ?? [];
+}
+
+Deno.serve(async (request) => {
+  if (!verifyCron(request)) {
+    return json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const payload = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+  const campaignId =
+    typeof payload.campaignId === "string" && payload.campaignId.trim().length ? payload.campaignId : null;
+  const maxJobs = Math.max(
+    1,
+    Math.min(
+      Number.isFinite(Number(payload.maxJobs))
+        ? Number(payload.maxJobs)
+        : config.defaultPerMinuteThrottle,
+      250,
+    ),
+  );
+  const ignoreSendWindow = payload.ignoreSendWindow === true;
+  const runId = await startQueueRun({ campaignId, maxJobs, ignoreSendWindow });
   let processed = 0;
+  let errorCount = 0;
   const workspaceSendCache = new Map<
     string,
     { billingStatus: string; dailyLimit: number; monthlyLimit: number; dailyUsed: number; monthlyUsed: number }
   >();
+  const campaignSendCache = new Map<string, number>();
 
-  for (const item of dueContacts ?? []) {
-    const campaign = item.campaign;
-    const contact = item.contact;
+  try {
+    const reservationToken = crypto.randomUUID();
+    const { data: rawReservedJobs, error: reserveError } = await supabase.rpc("reserve_campaign_send_jobs", {
+      p_campaign_id: campaignId,
+      p_limit: maxJobs,
+      p_now: new Date().toISOString(),
+      p_reservation_token: reservationToken,
+    });
 
-    if (!campaign || !contact || campaign.status !== "active" || contact.unsubscribed_at) {
-      continue;
-    }
-    if (!isWithinSendWindow(campaign.timezone, campaign.send_window_start, campaign.send_window_end)) {
-      continue;
-    }
-
-    const workflowSteps = normalizeWorkflowDefinition(
-      campaign.workflow_definition_jsonb,
-      (item.campaign?.campaign_steps as Array<Record<string, unknown>> | null | undefined) ?? [],
-    );
-    const step = workflowSteps.find((candidate) => Number(candidate.stepNumber) === Number(item.current_step));
-
-    if (!step) {
-      continue;
+    if (reserveError) {
+      throw reserveError;
     }
 
-    let workspaceSendState = workspaceSendCache.get(campaign.workspace_id);
+    const reservedJobs = (rawReservedJobs as Array<{ id: string }> | null) ?? [];
 
-    if (!workspaceSendState) {
-      workspaceSendState = await getWorkspaceSendState(campaign.workspace_id);
-      workspaceSendCache.set(campaign.workspace_id, workspaceSendState);
+    if (!reservedJobs.length) {
+      await updateQueueRun(runId, {
+        status: "success",
+        processedCount: 0,
+        errorCount: 0,
+        metadata: { campaignId, maxJobs, ignoreSendWindow },
+      });
+      return json({ processed: 0, reserved: 0 });
     }
 
-    if (!["active", "trialing"].includes(workspaceSendState.billingStatus)) {
-      await supabase
-        .from("campaign_contacts")
-        .update({
-          error_message: "Workspace billing status is not active for sending.",
-          next_due_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-        })
-        .eq("id", item.id);
-      continue;
-    }
+    const jobs = await loadReservedJobs(reservedJobs.map((job) => job.id));
 
-    if (workspaceSendState.dailyUsed >= workspaceSendState.dailyLimit) {
-      await supabase
-        .from("campaign_contacts")
-        .update({
-          error_message: "Workspace daily send limit reached.",
-          next_due_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-        })
-        .eq("id", item.id);
-      continue;
-    }
+    for (const job of jobs) {
+      const campaign = job.campaign;
+      const campaignContact = job.campaign_contact;
+      const contact = campaignContact?.contact;
+      const nowIso = new Date().toISOString();
 
-    if (workspaceSendState.monthlyUsed >= workspaceSendState.monthlyLimit) {
-      await supabase
-        .from("campaign_contacts")
-        .update({
-          error_message: "Workspace monthly send limit reached.",
-          next_due_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
-        })
-        .eq("id", item.id);
-      continue;
-    }
-
-    const { data: mailbox } = await supabase
-      .from("gmail_accounts")
-      .select("id, email_address, approval_status, oauth_connection:oauth_connections(id, access_token_encrypted, refresh_token_encrypted, token_expiry)")
-      .eq("id", campaign.gmail_account_id)
-      .single();
-
-    if (!mailbox || (mailbox.approval_status && mailbox.approval_status !== "approved")) {
-      continue;
-    }
-
-    const existingMessage = (item.outbound_messages as Array<{ step_number: number }> | null)?.find(
-      (message) => message.step_number === item.current_step,
-    );
-
-    if (existingMessage) {
-      const { data: rawEvents } = await supabase
-        .from("message_events")
-        .select("event_type, metadata")
-        .eq("campaign_contact_id", item.id)
-        .order("occurred_at", { ascending: true });
-      const resolution = resolveWorkflowAdvance(
-        workflowSteps,
-        Number(item.current_step),
-        (rawEvents as Array<{ event_type: string; metadata?: { stepNumber?: number | string | null } | null }> | null) ?? [],
-      );
-
-      if (resolution.action === "advance") {
-        await supabase
-          .from("campaign_contacts")
-          .update({
-            status: Number(resolution.nextStep.stepNumber) > 1 ? "followup_due" : "queued",
-            current_step: Number(resolution.nextStep.stepNumber),
-            current_node_key: String(resolution.nextStep.key ?? `step-${resolution.nextStep.stepNumber}`),
-            branch_history_jsonb: [
-              ...(((item.branch_history_jsonb as Array<Record<string, unknown>> | null | undefined) ?? [])),
-              {
-                fromStep: item.current_step,
-                toStep: Number(resolution.nextStep.stepNumber),
-                matched: Boolean(resolution.matched),
-                reason: resolution.reason ?? null,
-                resolvedAt: new Date().toISOString(),
-              },
-            ],
-            next_due_at: new Date().toISOString(),
-            error_message: null,
-          })
-          .eq("id", item.id);
-      } else {
-        await supabase
-          .from("campaign_contacts")
-          .update({
-            status: Number(item.current_step) > 1 ? "followup_sent" : "sent",
-            current_node_key: null,
-            exit_reason: resolution.exitReason ?? null,
-            next_due_at: null,
-            error_message: null,
-          })
-          .eq("id", item.id);
+      if (!campaign || !campaignContact || !contact) {
+        await cancelCurrentJob({
+          jobId: job.id,
+          campaignContactId: job.campaign_contact_id,
+          reason: "Missing campaign or contact data",
+        });
+        errorCount += 1;
+        continue;
       }
 
-      continue;
-    }
+      if (campaign.status !== "active") {
+        const scheduledFor = computeNextWindowStartAt({
+          baseAt: nowIso,
+          timezone: campaign.timezone,
+          sendWindowStart: campaign.send_window_start,
+          allowedSendDays: campaign.allowed_send_days ?? undefined,
+        });
+        await releaseReservedJob({
+          jobId: job.id,
+          campaignContactId: campaignContact.id,
+          scheduledFor,
+          lastError: "Campaign is paused or inactive.",
+        });
+        continue;
+      }
 
-    await supabase
-      .from("campaign_contacts")
-      .update({ updated_at: new Date().toISOString() })
-      .eq("id", item.id)
-      .eq("status", item.status);
+      if (
+        contact.unsubscribed_at ||
+        isTerminalCampaignContactStatus(campaignContact.status) ||
+        ["unsubscribed", "replied", "meeting_booked"].includes(campaignContact.status)
+      ) {
+        await cancelCurrentJob({
+          jobId: job.id,
+          campaignContactId: campaignContact.id,
+          reason: "Contact is no longer eligible for follow-up.",
+        });
+        continue;
+      }
 
-    try {
-      const accessToken = await resolveMailboxAccess(mailbox);
-      const unsubscribeToken = crypto.randomUUID();
-      const unsubscribeLink = `${Deno.env.get("NEXT_PUBLIC_APP_URL") ?? "http://localhost:3000"}/api/unsubscribes/${unsubscribeToken}`;
-      const renderedSubject = renderTemplate(String(step.subject ?? ""), contact);
-      const renderedTextBody = renderTemplate(String(step.body ?? ""), contact);
-      const renderedHtmlBody =
-        String(step.mode ?? "text") === "html" && step.bodyHtml
-          ? renderTemplate(String(step.bodyHtml ?? ""), contact)
-          : `${renderedTextBody}<br /><br /><a href="${unsubscribeLink}">Unsubscribe</a>`;
-      const trackedHtml = await instrumentHtmlForTracking({
-        workspaceId: campaign.workspace_id,
-        campaignContactId: item.id,
-        stepNumber: item.current_step,
-        html: renderedHtmlBody.includes("Unsubscribe")
-          ? renderedHtmlBody
-          : `${renderedHtmlBody}<br /><br /><a href="${unsubscribeLink}">Unsubscribe</a>`,
-      });
-      const nextStep = workflowSteps.find(
-        (candidate) => Number(candidate.stepNumber) === Number(item.current_step) + 1,
+      if (
+        !ignoreSendWindow &&
+        (!isWithinAllowedSendDay(new Date(), campaign.timezone, campaign.allowed_send_days ?? undefined) ||
+          !isWithinSendWindow(
+            new Date(),
+            campaign.timezone,
+            campaign.send_window_start,
+            campaign.send_window_end,
+          ))
+      ) {
+        const scheduledFor = computeNextScheduledSendAt({
+          baseSentAt: nowIso,
+          waitDays: 0,
+          timezone: campaign.timezone,
+          sendWindowStart: campaign.send_window_start,
+          sendWindowEnd: campaign.send_window_end,
+          allowedSendDays: campaign.allowed_send_days ?? undefined,
+        });
+        await releaseReservedJob({
+          jobId: job.id,
+          campaignContactId: campaignContact.id,
+          scheduledFor,
+          lastError: "Outside send window.",
+        });
+        continue;
+      }
+
+      const workflowSteps = normalizeWorkflowDefinition(
+        campaign.workflow_definition_jsonb,
+        (campaign.campaign_steps as Array<Record<string, unknown>> | null | undefined) ?? [],
       );
-      const sendResult = await gmailSend({
-        accessToken,
-        fromEmail: mailbox.email_address,
-        toEmail: contact.email,
-        subject: renderedSubject,
-        bodyHtml: trackedHtml,
-        threadId: item.current_step > 1 ? item.last_thread_id : null,
-      });
+      const step = workflowSteps.find((candidate) => Number(candidate.stepNumber) === Number(job.step_number));
 
-      const sentAt = new Date().toISOString();
+      if (!step || !contact.email) {
+        await cancelCurrentJob({
+          jobId: job.id,
+          campaignContactId: campaignContact.id,
+          reason: "Workflow step or recipient email is missing.",
+          campaignContactStatus: "failed",
+          currentStep: job.step_number,
+        });
+        errorCount += 1;
+        continue;
+      }
 
-      await supabase.from("outbound_messages").insert({
-        campaign_contact_id: item.id,
-        gmail_message_id: sendResult.id ?? null,
-        gmail_thread_id: sendResult.threadId ?? null,
-        step_number: item.current_step,
-        sent_at: sentAt,
-        status: "sent",
-      });
+      if (step.stepNumber > 1) {
+        const previousStepNumber = step.stepNumber - 1;
+        const { data: rawEvents, error: eventsError } = await supabase
+          .from("message_events")
+          .select("event_type, metadata")
+          .eq("campaign_contact_id", campaignContact.id)
+          .order("occurred_at", { ascending: true });
 
-      await supabase.from("message_threads").upsert({
-        workspace_id: campaign.workspace_id,
-        campaign_contact_id: item.id,
-        gmail_thread_id: sendResult.threadId ?? sendResult.id ?? crypto.randomUUID(),
-        subject: renderedSubject,
-        snippet: renderedTextBody.slice(0, 120),
-        latest_message_at: sentAt,
-      });
+        if (eventsError) {
+          throw eventsError;
+        }
 
-      await supabase.from("unsubscribes").upsert({
-        workspace_id: campaign.workspace_id,
-        contact_id: item.contact_id,
-        email: contact.email,
-        token_hash: await hashToken(unsubscribeToken),
-      });
+        const resolution = resolveWorkflowAdvance(
+          workflowSteps,
+          previousStepNumber,
+          (rawEvents as Array<{
+            event_type: string;
+            metadata?: { stepNumber?: number | string | null } | null;
+          }> | null) ?? [],
+        );
 
-      await supabase
-        .from("campaign_contacts")
-        .update({
-          status: nextStep ? "sent" : item.current_step > 1 ? "followup_sent" : "sent",
-          current_step: item.current_step,
-          current_node_key: String(step.key ?? `step-${item.current_step}`),
-          next_due_at: nextStep
-            ? new Date(Date.now() + Number(step.waitDays ?? config.followUpDelayDays) * 24 * 60 * 60 * 1000).toISOString()
-            : null,
-          last_thread_id: sendResult.threadId ?? null,
-          last_message_id: sendResult.id ?? null,
-        })
-        .eq("id", item.id);
+        if (resolution.action !== "advance" || Number(resolution.nextStep.stepNumber) !== step.stepNumber) {
+          await cancelCurrentJob({
+            jobId: job.id,
+            campaignContactId: campaignContact.id,
+            reason: resolution.exitReason ?? "Sequence exited before the follow-up step.",
+            campaignContactStatus: previousStepNumber > 1 ? "followup_sent" : "sent",
+            currentStep: previousStepNumber,
+          });
+          continue;
+        }
+      }
 
-      await supabase.from("message_events").insert({
-        workspace_id: campaign.workspace_id,
-        campaign_contact_id: item.id,
-        gmail_message_id: sendResult.id ?? null,
-        event_type: "sent",
-        metadata: {
-          stepNumber: item.current_step,
-          subject: renderedSubject,
+      let workspaceSendState = workspaceSendCache.get(campaign.workspace_id);
+
+      if (!workspaceSendState) {
+        workspaceSendState = await getWorkspaceSendState(campaign.workspace_id);
+        workspaceSendCache.set(campaign.workspace_id, workspaceSendState);
+      }
+
+      if (!["active", "trialing"].includes(workspaceSendState.billingStatus)) {
+        await releaseReservedJob({
+          jobId: job.id,
+          campaignContactId: campaignContact.id,
+          scheduledFor: computeRetryScheduledAt({
+            baseAt: nowIso,
+            retryDelayMinutes: 60,
+            timezone: campaign.timezone,
+            sendWindowStart: campaign.send_window_start,
+            sendWindowEnd: campaign.send_window_end,
+            allowedSendDays: campaign.allowed_send_days ?? undefined,
+          }),
+          lastError: "Workspace billing status is not active for sending.",
+        });
+        continue;
+      }
+
+      if (workspaceSendState.dailyUsed >= workspaceSendState.dailyLimit) {
+        await releaseReservedJob({
+          jobId: job.id,
+          campaignContactId: campaignContact.id,
+          scheduledFor: computeRetryScheduledAt({
+            baseAt: nowIso,
+            retryDelayMinutes: 60,
+            timezone: campaign.timezone,
+            sendWindowStart: campaign.send_window_start,
+            sendWindowEnd: campaign.send_window_end,
+            allowedSendDays: campaign.allowed_send_days ?? undefined,
+          }),
+          lastError: "Workspace daily send limit reached.",
+        });
+        continue;
+      }
+
+      if (workspaceSendState.monthlyUsed >= workspaceSendState.monthlyLimit) {
+        await releaseReservedJob({
+          jobId: job.id,
+          campaignContactId: campaignContact.id,
+          scheduledFor: computeRetryScheduledAt({
+            baseAt: nowIso,
+            retryDelayMinutes: 360,
+            timezone: campaign.timezone,
+            sendWindowStart: campaign.send_window_start,
+            sendWindowEnd: campaign.send_window_end,
+            allowedSendDays: campaign.allowed_send_days ?? undefined,
+          }),
+          lastError: "Workspace monthly send limit reached.",
+        });
+        continue;
+      }
+
+      const campaignDateKey = `${campaign.id}:${getDateKeyInTimeZone(nowIso, campaign.timezone)}`;
+      let sentToday = campaignSendCache.get(campaignDateKey);
+
+      if (typeof sentToday === "undefined") {
+        sentToday = await getCampaignDaySendCount(campaign.id, campaign.timezone, nowIso);
+        campaignSendCache.set(campaignDateKey, sentToday);
+      }
+
+      if (sentToday >= campaign.daily_send_limit) {
+        const scheduledFor = computeNextWindowStartAt({
+          baseAt: nowIso,
+          timezone: campaign.timezone,
+          sendWindowStart: campaign.send_window_start,
+          allowedSendDays: campaign.allowed_send_days ?? undefined,
+        });
+        await releaseReservedJob({
+          jobId: job.id,
+          campaignContactId: campaignContact.id,
+          scheduledFor,
+          lastError: "Campaign daily send limit reached for the current day.",
+        });
+        continue;
+      }
+
+      const { data: mailbox, error: mailboxError } = await supabase
+        .from("gmail_accounts")
+        .select(
+          "id, project_id, email_address, approval_status, oauth_connection:oauth_connections(id, access_token_encrypted, refresh_token_encrypted, token_expiry)",
+        )
+        .eq("id", campaign.gmail_account_id)
+        .single();
+
+      if (mailboxError) {
+        throw mailboxError;
+      }
+
+      if (!mailbox || (mailbox.approval_status && mailbox.approval_status !== "approved")) {
+        await releaseReservedJob({
+          jobId: job.id,
+          campaignContactId: campaignContact.id,
+          scheduledFor: computeRetryScheduledAt({
+            baseAt: nowIso,
+            retryDelayMinutes: 60,
+            timezone: campaign.timezone,
+            sendWindowStart: campaign.send_window_start,
+            sendWindowEnd: campaign.send_window_end,
+            allowedSendDays: campaign.allowed_send_days ?? undefined,
+          }),
+          lastError: "Mailbox is not ready for sending.",
+        });
+        continue;
+      }
+
+      const provisionalOutbound = await ensureOutboundMessageRecord(campaignContact.id, step.stepNumber);
+
+      if (provisionalOutbound.sent_at || provisionalOutbound.status === "sent") {
+        const recoveredSentAt = provisionalOutbound.sent_at ?? nowIso;
+        const nextStep = workflowSteps.find(
+          (candidate) => Number(candidate.stepNumber) === Number(step.stepNumber) + 1,
+        );
+        await updateJob(job.id, {
+          status: "sent",
+          processed_at: recoveredSentAt,
+          reservation_token: null,
+          last_error: null,
+        });
+
+        if (nextStep) {
+          const scheduledFor = computeNextScheduledSendAt({
+            baseSentAt: recoveredSentAt,
+            waitDays: Number(step.waitDays ?? config.followUpDelayDays),
+            timezone: campaign.timezone,
+            sendWindowStart: campaign.send_window_start,
+            sendWindowEnd: campaign.send_window_end,
+            allowedSendDays: campaign.allowed_send_days ?? undefined,
+          });
+          await queueNextStep({
+            campaign,
+            campaignContact: {
+              ...campaignContact,
+              last_thread_id: provisionalOutbound.gmail_thread_id ?? campaignContact.last_thread_id,
+              last_message_id: provisionalOutbound.gmail_message_id ?? campaignContact.last_message_id,
+            },
+            nextStep,
+            scheduledFor,
+          });
+          await supabase
+            .from("campaign_contacts")
+            .update({
+              last_thread_id: provisionalOutbound.gmail_thread_id ?? campaignContact.last_thread_id ?? null,
+              last_message_id: provisionalOutbound.gmail_message_id ?? campaignContact.last_message_id ?? null,
+              error_message: null,
+            })
+            .eq("id", campaignContact.id);
+        } else {
+          await supabase
+            .from("campaign_contacts")
+            .update({
+              status: step.stepNumber > 1 ? "followup_sent" : "sent",
+              current_step: step.stepNumber,
+              next_due_at: null,
+              last_thread_id: provisionalOutbound.gmail_thread_id ?? campaignContact.last_thread_id ?? null,
+              last_message_id: provisionalOutbound.gmail_message_id ?? campaignContact.last_message_id ?? null,
+              error_message: null,
+            })
+            .eq("id", campaignContact.id);
+        }
+
+        await syncCampaignContactNextDueAt(campaignContact.id);
+        continue;
+      }
+
+      try {
+        const accessToken = await resolveMailboxAccess(mailbox);
+        const unsubscribeToken = crypto.randomUUID();
+        const unsubscribeLink = `${Deno.env.get("NEXT_PUBLIC_APP_URL") ?? "http://localhost:3000"}/api/unsubscribes/${unsubscribeToken}`;
+        const rendered = buildRenderedContent({
+          step,
+          contact,
+          unsubscribeLink,
+        });
+        const trackedHtml = await instrumentHtmlForTracking({
+          workspaceId: campaign.workspace_id,
+          campaignContactId: campaignContact.id,
+          stepNumber: step.stepNumber,
+          html: rendered.bodyHtml,
+        });
+        const sendResult = await gmailSend({
+          accessToken,
+          fromEmail: mailbox.email_address,
           toEmail: contact.email,
-        },
-      });
-      await enqueueCrmWritebackJobs({
-        supabase,
-        workspaceId: campaign.workspace_id,
-        campaignContactId: item.id,
-        eventType: "sent",
-        metadata: {
-          stepNumber: item.current_step,
-          subject: renderedSubject,
-        },
-      });
+          subject: rendered.subject,
+          bodyHtml: trackedHtml,
+          threadId: step.stepNumber > 1 ? campaignContact.last_thread_id ?? null : null,
+        });
 
-      workspaceSendState.dailyUsed += 1;
-      workspaceSendState.monthlyUsed += 1;
+        const sentAt = new Date().toISOString();
+        const nextStep = workflowSteps.find(
+          (candidate) => Number(candidate.stepNumber) === Number(step.stepNumber) + 1,
+        );
 
-      processed += 1;
-    } catch (sendError) {
-      await supabase
-        .from("campaign_contacts")
-        .update({
-          status: "failed",
-          failed_attempts: item.failed_attempts + 1,
-          error_message: sendError instanceof Error ? sendError.message : "Unknown send error",
-        })
-        .eq("id", item.id);
+        await supabase
+          .from("outbound_messages")
+          .update({
+            gmail_message_id: sendResult.id ?? null,
+            gmail_thread_id: sendResult.threadId ?? null,
+            sent_at: sentAt,
+            status: "sent",
+            error_message: null,
+          })
+          .eq("id", provisionalOutbound.id);
+
+        await supabase.from("message_threads").upsert({
+          workspace_id: campaign.workspace_id,
+          project_id: campaign.project_id,
+          campaign_contact_id: campaignContact.id,
+          gmail_thread_id: sendResult.threadId || sendResult.id || crypto.randomUUID(),
+          subject: rendered.subject,
+          snippet: rendered.snippet,
+          latest_message_at: sentAt,
+        });
+
+        await upsertUnsubscribeRecord({
+          workspaceId: campaign.workspace_id,
+          contactId: campaignContact.contact_id,
+          email: contact.email,
+          token: unsubscribeToken,
+        });
+
+        await supabase.from("message_events").insert({
+          workspace_id: campaign.workspace_id,
+          campaign_contact_id: campaignContact.id,
+          outbound_message_id: provisionalOutbound.id,
+          gmail_message_id: sendResult.id ?? null,
+          event_type: "sent",
+          metadata: {
+            stepNumber: step.stepNumber,
+            subject: rendered.subject,
+            toEmail: contact.email,
+          },
+        });
+        await enqueueCrmWritebackJobs({
+          supabase,
+          workspaceId: campaign.workspace_id,
+          campaignContactId: campaignContact.id,
+          eventType: "sent",
+          metadata: {
+            stepNumber: step.stepNumber,
+            subject: rendered.subject,
+          },
+        });
+
+        await updateJob(job.id, {
+          status: "sent",
+          processed_at: sentAt,
+          reservation_token: null,
+          last_error: null,
+          attempt_count: job.attempt_count,
+        });
+
+        if (nextStep) {
+          const scheduledFor = computeNextScheduledSendAt({
+            baseSentAt: sentAt,
+            waitDays: Number(step.waitDays ?? config.followUpDelayDays),
+            timezone: campaign.timezone,
+            sendWindowStart: campaign.send_window_start,
+            sendWindowEnd: campaign.send_window_end,
+            allowedSendDays: campaign.allowed_send_days ?? undefined,
+          });
+          await queueNextStep({
+            campaign,
+            campaignContact,
+            nextStep,
+            scheduledFor,
+          });
+          await supabase
+            .from("campaign_contacts")
+            .update({
+              last_thread_id: sendResult.threadId ?? null,
+              last_message_id: sendResult.id ?? null,
+              error_message: null,
+            })
+            .eq("id", campaignContact.id);
+        } else {
+          await supabase
+            .from("campaign_contacts")
+            .update({
+              status: step.stepNumber > 1 ? "followup_sent" : "sent",
+              current_step: step.stepNumber,
+              next_due_at: null,
+              last_thread_id: sendResult.threadId ?? null,
+              last_message_id: sendResult.id ?? null,
+              error_message: null,
+            })
+            .eq("id", campaignContact.id);
+        }
+
+        workspaceSendState.dailyUsed += 1;
+        workspaceSendState.monthlyUsed += 1;
+        campaignSendCache.set(campaignDateKey, sentToday + 1);
+        processed += 1;
+      } catch (sendError) {
+        const message =
+          sendError instanceof Error ? sendError.message : "Unknown send error";
+        const attemptCount = job.attempt_count + 1;
+
+        await supabase
+          .from("outbound_messages")
+          .update({
+            status: "failed",
+            error_message: message,
+          })
+          .eq("id", provisionalOutbound.id);
+
+        if (attemptCount >= MAX_JOB_ATTEMPTS || isPermanentSendError(message)) {
+          await updateJob(job.id, {
+            status: "failed",
+            processed_at: new Date().toISOString(),
+            reservation_token: null,
+            last_error: message,
+            attempt_count: attemptCount,
+          });
+          await supabase
+            .from("campaign_contacts")
+            .update({
+              status: "failed",
+              next_due_at: null,
+              error_message: message,
+              failed_attempts: campaignContact.failed_attempts + 1,
+            })
+            .eq("id", campaignContact.id);
+        } else {
+          const scheduledFor = computeRetryScheduledAt({
+            baseAt: nowIso,
+            retryDelayMinutes: getRetryDelayMinutes(attemptCount),
+            timezone: campaign.timezone,
+            sendWindowStart: campaign.send_window_start,
+            sendWindowEnd: campaign.send_window_end,
+            allowedSendDays: campaign.allowed_send_days ?? undefined,
+          });
+          await updateJob(job.id, {
+            status: "pending",
+            scheduled_for: scheduledFor,
+            reserved_at: null,
+            reservation_token: null,
+            last_error: message,
+            attempt_count: attemptCount,
+          });
+          await supabase
+            .from("campaign_contacts")
+            .update({
+              status: step.stepNumber > 1 ? "followup_due" : "queued",
+              current_step: step.stepNumber,
+              next_due_at: scheduledFor,
+              error_message: message,
+              failed_attempts: campaignContact.failed_attempts + 1,
+            })
+            .eq("id", campaignContact.id);
+        }
+
+        errorCount += 1;
+      }
     }
-  }
 
-  return json({ processed });
+    await updateQueueRun(runId, {
+      status: errorCount === 0 ? "success" : processed > 0 ? "partial" : "error",
+      processedCount: processed,
+      errorCount,
+      metadata: { campaignId, maxJobs, ignoreSendWindow, reserved: jobs.length },
+    });
+
+    return json({
+      processed,
+      reserved: jobs.length,
+      errors: errorCount,
+    });
+  } catch (error) {
+    console.error("send-due-messages failed", error);
+    await updateQueueRun(runId, {
+      status: "error",
+      processedCount: processed,
+      errorCount: errorCount + 1,
+      metadata: {
+        campaignId,
+        maxJobs,
+        ignoreSendWindow,
+        error: error instanceof Error ? error.message : "Unknown worker error",
+      },
+    });
+    return json(
+      {
+        error: error instanceof Error ? error.message : "Unknown send queue error",
+        processed,
+      },
+      { status: 500 },
+    );
+  }
 });

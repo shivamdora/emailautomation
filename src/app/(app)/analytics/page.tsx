@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LiquidSelect } from "@/components/ui/liquid-select";
 import { productContent } from "@/content/product";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { getDashboardMetrics, getReplyRateByCampaign } from "@/services/analytics-service";
@@ -41,18 +42,21 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
         description={productContent.analytics.description}
         actions={
           <form method="get" className="flex flex-wrap items-center gap-3">
-            <select
+            <LiquidSelect
               name="projectId"
               defaultValue={isAllProjects ? "all" : selectedProject.id}
-              className="glass-control h-11 min-w-[14rem] rounded-[1rem] border-0 px-4 text-sm shadow-none"
-            >
-              <option value="all">{productContent.analytics.allProjectsLabel}</option>
-              {workspace.availableProjects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
+              ariaLabel="Filter analytics by project"
+              placeholder="Choose a project"
+              triggerClassName="min-w-[14rem]"
+              options={[
+                { value: "all", label: productContent.analytics.allProjectsLabel, description: "Compare every project" },
+                ...workspace.availableProjects.map((project) => ({
+                  value: project.id,
+                  label: project.name,
+                  description: project.website || project.brand_name || "Project",
+                })),
+              ]}
+            />
             <Button type="submit" size="sm">
               Apply filter
             </Button>

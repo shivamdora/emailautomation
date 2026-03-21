@@ -17,5 +17,7 @@ export async function POST(request: Request) {
     targetId: gmailAccountId,
   });
 
-  return NextResponse.redirect(new URL("/profile?gmail=disconnected", request.url));
+  return NextResponse.redirect(new URL("/settings/sending?gmail=disconnected", request.url), {
+    status: 303,
+  });
 }

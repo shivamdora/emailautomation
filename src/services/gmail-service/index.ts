@@ -10,6 +10,7 @@ import {
   requireGoogleConfiguration,
   requireSupabaseConfiguration,
 } from "@/lib/supabase/env";
+import { cancelPendingCampaignJobs } from "@/services/campaign-send-queue-service";
 import { assertWorkspaceCanConnectMailbox, refreshWorkspaceUsageCounters } from "@/services/entitlement-service";
 import { getMailboxProvider } from "@/services/mailbox-providers";
 import { recordMessageEvent } from "@/services/telemetry-service";
@@ -680,6 +681,14 @@ export async function syncWorkspaceReplies(workspaceId: string, projectId?: stri
               meeting_booked_at: disposition === "booked" ? message.sentAt : null,
               exit_reason: disposition === "negative" ? "negative_reply" : disposition === "booked" ? "meeting_booked" : "reply_received",
               next_due_at: null,
+            });
+            await cancelPendingCampaignJobs(threadRecord.campaign_contact_id, {
+              reason:
+                disposition === "negative"
+                  ? "Negative reply received"
+                  : disposition === "booked"
+                    ? "Meeting booked"
+                    : "Reply received",
             });
 
             if (disposition === "negative") {

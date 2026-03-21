@@ -27,7 +27,7 @@ export async function POST(request: Request) {
       connectionId,
     });
     return NextResponse.redirect(
-      new URL(`/settings?crmKey=${encodeURIComponent(result.inboundApiKey)}`, request.url),
+      new URL(`/settings/integrations?crmKey=${encodeURIComponent(result.inboundApiKey)}`, request.url),
       { status: 303 },
     );
   }
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       outboundWebhookUrl: String(formData.get("outboundWebhookUrl") ?? ""),
     });
 
-    return NextResponse.redirect(new URL("/settings", request.url), { status: 303 });
+    return NextResponse.redirect(new URL("/settings/integrations", request.url), { status: 303 });
   }
 
   const providerAccountLabel = String(formData.get("providerAccountLabel") ?? "").trim() || "Custom CRM";
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
 
   return NextResponse.redirect(
     new URL(
-      `/settings?crmKey=${encodeURIComponent(result.inboundApiKey)}&crmWebhookSecret=${encodeURIComponent(result.webhookSigningSecret)}`,
+      `/settings/integrations?crmKey=${encodeURIComponent(result.inboundApiKey)}&crmWebhookSecret=${encodeURIComponent(result.webhookSigningSecret)}`,
       request.url,
     ),
     { status: 303 },

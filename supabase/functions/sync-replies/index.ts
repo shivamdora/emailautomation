@@ -94,7 +94,7 @@ Deno.serve(async (request) => {
 
   const { data: mailboxes, error } = await supabase
     .from("gmail_accounts")
-    .select("id, workspace_id, email_address, approval_status, last_history_id, oauth_connection:oauth_connections(id, access_token_encrypted, refresh_token_encrypted, token_expiry)")
+    .select("id, workspace_id, project_id, email_address, approval_status, last_history_id, oauth_connection:oauth_connections(id, access_token_encrypted, refresh_token_encrypted, token_expiry)")
     .eq("status", "active");
 
   if (error) {
@@ -119,12 +119,13 @@ Deno.serve(async (request) => {
       );
       const { data: existingThread } = await supabase
         .from("message_threads")
-        .select("id, campaign_contact_id")
+        .select("id, campaign_contact_id, project_id")
         .eq("gmail_thread_id", thread.id)
         .maybeSingle();
 
       await supabase.from("message_threads").upsert({
         workspace_id: mailbox.workspace_id,
+        project_id: (existingThread as { project_id?: string | null } | null)?.project_id ?? mailbox.project_id,
         gmail_thread_id: thread.id,
         campaign_contact_id: existingThread?.campaign_contact_id ?? null,
         subject:
@@ -174,6 +175,12 @@ Deno.serve(async (request) => {
             const disposition = classifyReplyDisposition(
               [headers.Subject ?? "", bodyText ?? "", message.snippet ?? ""].filter(Boolean).join("\n"),
             );
+            const { data: rawCampaignContact } = await supabase
+              .from("campaign_contacts")
+              .select("contact_id")
+              .eq("id", threadRecord.campaign_contact_id)
+              .maybeSingle();
+            const campaignContact = rawCampaignContact as { contact_id?: string | null } | null;
             const nextStatus =
               disposition === "negative"
                 ? "unsubscribed"
@@ -196,6 +203,30 @@ Deno.serve(async (request) => {
                 next_due_at: null,
               })
               .eq("id", threadRecord.campaign_contact_id);
+
+            await supabase
+              .from("campaign_send_jobs")
+              .update({
+                status: "canceled",
+                canceled_at: sentAt,
+                processed_at: sentAt,
+                last_error:
+                  disposition === "negative"
+                    ? "Negative reply received"
+                    : disposition === "booked"
+                      ? "Meeting booked"
+                      : "Reply received",
+                reservation_token: null,
+              })
+              .eq("campaign_contact_id", threadRecord.campaign_contact_id)
+              .in("status", ["pending", "reserved"]);
+
+            if (disposition === "negative" && campaignContact?.contact_id) {
+              await supabase
+                .from("contacts")
+                .update({ unsubscribed_at: sentAt })
+                .eq("id", campaignContact.contact_id);
+            }
 
             await supabase.from("message_events").insert({
               workspace_id: mailbox.workspace_id,

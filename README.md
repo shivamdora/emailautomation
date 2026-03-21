@@ -11,7 +11,8 @@ OutboundFlow is a production-grade internal outbound platform for small teams. I
 - React Hook Form + Zod
 - Recharts for dashboard analytics
 - Gmail API for mailbox send and sync
-- HubSpot and Salesforce OAuth for CRM sync
+- HubSpot, Salesforce, Pipedrive, and Zoho OAuth for CRM sync
+- Slack, Calendly, Hunter, and signed generic webhooks for workspace integrations
 
 ## What ships now
 
@@ -22,7 +23,8 @@ OutboundFlow is a production-grade internal outbound platform for small teams. I
 - HTML-rendered email template gallery with two seeded ready-to-use templates per workspace
 - Open and click tracking plus reply disposition handling
 - Custom CRM managed API keys and webhook writeback
-- HubSpot and Salesforce OAuth connection flows with contact sync foundations
+- HubSpot, Salesforce, Pipedrive, and Zoho OAuth connection flows with contact sync foundations
+- Slack alerts, signed webhooks, Hunter verification, and Calendly meeting-booked automation
 - Internal billing plans, entitlement enforcement, usage tracking, and billing history
 - Gmail-first seed inbox monitoring with queued placement probes and result history
 - Supabase cron functions for send queue, reply sync, CRM sync, and seed monitoring
@@ -85,6 +87,20 @@ docs/
 - `SALESFORCE_CLIENT_SECRET`
 - `SALESFORCE_OAUTH_REDIRECT_URI`
 - `SALESFORCE_AUTH_BASE_URL`
+- `PIPEDRIVE_CLIENT_ID`
+- `PIPEDRIVE_CLIENT_SECRET`
+- `PIPEDRIVE_OAUTH_REDIRECT_URI`
+- `ZOHO_CLIENT_ID`
+- `ZOHO_CLIENT_SECRET`
+- `ZOHO_OAUTH_REDIRECT_URI`
+- `ZOHO_ACCOUNTS_BASE_URL`
+- `ZOHO_API_BASE_URL`
+- `SLACK_CLIENT_ID`
+- `SLACK_CLIENT_SECRET`
+- `SLACK_OAUTH_REDIRECT_URI`
+- `CALENDLY_CLIENT_ID`
+- `CALENDLY_CLIENT_SECRET`
+- `CALENDLY_OAUTH_REDIRECT_URI`
 - `TOKEN_ENCRYPTION_KEY`
 - `SUPABASE_CRON_VERIFY_SECRET`
 - `SHARED_WORKSPACE_NAME`
@@ -112,18 +128,20 @@ Functions included:
 
 Recommended schedule:
 
-- `send-due-messages`: every 5 minutes
-- `sync-replies`: every 5 minutes
+- `send-due-messages`: every 1 minute
+- `sync-replies`: every 1 minute
 - `crm-sync`: every 15 minutes
 - `seed-monitor`: every `SEED_MONITOR_INTERVAL_MINUTES`
 
 All scheduled calls should send `x-cron-secret: <SUPABASE_CRON_VERIFY_SECRET>`.
+The send queue is minute-driven: initial sends and follow-ups are dispatched on the next 1-minute worker tick once they become eligible.
 
 ## CRM integrations
 
 - Custom CRM inbound import remains `POST /api/import/custom-crm/contacts`
 - Custom CRM auth is now connection-managed instead of env-managed
-- HubSpot and Salesforce connect through `/api/crm/connect/[provider]`
+- HubSpot, Salesforce, Pipedrive, and Zoho connect through `/api/crm/connect/[provider]`
+- Slack, generic webhooks, Hunter, and Calendly are managed through `/settings/integrations`
 
 Contract details: [docs/custom-crm-import.md](/Users/admin/Desktop/AI/outboundflow/outboundflow-new/emailautomation/emailautomation/docs/custom-crm-import.md)
 
@@ -137,5 +155,6 @@ Contract details: [docs/custom-crm-import.md](/Users/admin/Desktop/AI/outboundfl
 
 - Billing stays internal-only and controls entitlements rather than public payment collection.
 - CRM sync and writeback are centered on `crm_connections`, `crm_sync_runs`, `crm_object_links`, and `crm_push_jobs`.
+- Workspace-level non-CRM integrations are centered on `workspace_integrations`.
 - Template seeding is idempotent and happens automatically for new and existing workspaces.
 - Tokens are encrypted server-side with `TOKEN_ENCRYPTION_KEY`.

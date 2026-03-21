@@ -2,6 +2,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { requireSupabaseConfiguration } from "@/lib/supabase/env";
 import type { ContactRecord, ContactTag } from "@/lib/types/contact";
 import { googleSheetsUrlToCsvUrl, parseImportFile, type ParsedImportRow } from "@/lib/utils/imports";
+import { maybeVerifyImportedContactsWithHunter } from "@/services/hunter-service";
 
 const CONTACT_SELECT =
   "id, email, first_name, last_name, company, website, job_title, source, unsubscribed_at, custom_fields_jsonb, contact_tag_members(contact_tags(id, name))";
@@ -645,7 +646,7 @@ export async function processImportFile(input: {
 
   await supabase.from("import_rows").insert(rowInserts);
 
-  const dedupedContacts = Array.from(
+  let dedupedContacts = Array.from(
     mappedRows
       .filter((row): row is NonNullable<ReturnType<typeof mapImportRow>> => Boolean(row))
       .reduce((accumulator, row) => {
@@ -673,6 +674,11 @@ export async function processImportFile(input: {
         return accumulator;
       }, new Map<string, ImportContactPayload>()),
   ).map(([, value]) => value);
+
+  dedupedContacts = await maybeVerifyImportedContactsWithHunter({
+    workspaceId: input.workspaceId,
+    contacts: dedupedContacts,
+  });
 
   if (dedupedContacts.length) {
     const emails = dedupedContacts.map((contact) => contact.email);

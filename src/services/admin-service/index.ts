@@ -11,6 +11,7 @@ import {
 } from "@/lib/supabase/env";
 import { isAnyMissingColumnResult } from "@/lib/utils/supabase-schema";
 import { getWorkspaceBillingTimeline, getWorkspacePlanLimits } from "@/services/billing-service";
+import { getCampaignSendQueueHealth } from "@/services/campaign-send-queue-service";
 import { listWorkspaceCrmConnections } from "@/services/crm-service";
 import { getWorkspaceGmailAccounts } from "@/services/gmail-service";
 import { getWorkspaceSeedMonitorSummary } from "@/services/seed-monitor-service";
@@ -19,7 +20,13 @@ export async function getWorkspaceAdminSummary(workspaceId: string) {
   requireSupabaseConfiguration();
 
   const supabase = createAdminSupabaseClient();
-  const [members, gmailAccounts, usageCounter, billingTimeline, planLimits, seedMonitorSummary] = await Promise.all([
+  const sendQueueHealthPromise = getCampaignSendQueueHealth(workspaceId).catch(() => ({
+    oldestPendingDueAt: null,
+    failedJobCount: 0,
+    pendingJobCount: 0,
+    lastSuccessfulRun: null,
+  }));
+  const [members, gmailAccounts, usageCounter, billingTimeline, planLimits, seedMonitorSummary, sendQueueHealth] = await Promise.all([
     listWorkspaceMembers(workspaceId),
     getWorkspaceGmailAccounts(workspaceId),
     supabase
@@ -32,6 +39,7 @@ export async function getWorkspaceAdminSummary(workspaceId: string) {
     getWorkspaceBillingTimeline(workspaceId),
     getWorkspacePlanLimits(workspaceId),
     getWorkspaceSeedMonitorSummary(workspaceId),
+    sendQueueHealthPromise,
   ]);
 
   let billingAccount = await supabase
@@ -119,6 +127,7 @@ export async function getWorkspaceAdminSummary(workspaceId: string) {
       observed_at: string;
       probe_key: string;
     }>,
+    sendQueueHealth,
   };
 }
 

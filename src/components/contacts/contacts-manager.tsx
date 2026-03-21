@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LiquidSelect } from "@/components/ui/liquid-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 type ContactsManagerProps = {
@@ -350,19 +351,20 @@ export function ContactsManager({ initialContacts, initialTags }: ContactsManage
             <div className="glass-control grid gap-4 rounded-[26px] p-4 sm:p-5">
               <div className="grid gap-2">
                 <Label htmlFor="contactsTagFilter">{productContent.contacts.controls.filterLabel}</Label>
-                <select
+                <LiquidSelect
                   id="contactsTagFilter"
-                  className="glass-control h-12 rounded-[1.1rem] px-4 text-sm outline-none transition-[border-color,box-shadow,background-color] duration-200 focus:ring-4 focus:ring-ring"
                   value={tagFilter}
-                  onChange={(event) => setTagFilter(event.target.value)}
-                >
-                  <option value="all">{productContent.contacts.controls.filterAllLabel}</option>
-                  {tags.map((tag) => (
-                    <option key={tag.id} value={tag.name}>
-                      {tag.name}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={setTagFilter}
+                  triggerClassName="h-12 rounded-[1.1rem]"
+                  options={[
+                    { value: "all", label: productContent.contacts.controls.filterAllLabel, description: "Show every contact" },
+                    ...tags.map((tag) => ({
+                      value: tag.name,
+                      label: tag.name,
+                      description: "Filter by tag",
+                    })),
+                  ]}
+                />
               </div>
 
               <div className="grid gap-2">

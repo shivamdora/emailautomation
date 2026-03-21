@@ -17,5 +17,5 @@ export async function POST(request: Request) {
   }
 
   await disconnectCrmConnection(workspace.workspaceId, connectionId);
-  return NextResponse.redirect(new URL("/settings", request.url), { status: 303 });
+  return NextResponse.redirect(new URL("/settings/integrations", request.url), { status: 303 });
 }

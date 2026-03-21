@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     const redirectUri = new URL("/api/gmail/callback", request.url).toString();
 
     if (!code || !state) {
-      return NextResponse.redirect(new URL("/profile?gmail=missing-code", request.url));
+      return NextResponse.redirect(new URL("/settings/sending?gmail=missing-code", request.url));
     }
 
     const verified = await jwtVerify(state, getStateSecret());
@@ -74,7 +74,7 @@ export async function GET(request: Request) {
       return redirectTo(desktopRedirect);
     }
 
-    return NextResponse.redirect(new URL("/profile?gmail=connected", request.url));
+    return NextResponse.redirect(new URL("/settings/sending?gmail=connected", request.url));
   } catch (error) {
     const message =
       error instanceof Error ? encodeURIComponent(error.message.slice(0, 160)) : "unknown-error";
@@ -89,6 +89,6 @@ export async function GET(request: Request) {
       return redirectTo(desktopRedirect);
     }
 
-    return NextResponse.redirect(new URL(`/profile?gmail=error&message=${message}`, request.url));
+    return NextResponse.redirect(new URL(`/settings/sending?gmail=error&message=${message}`, request.url));
   }
 }

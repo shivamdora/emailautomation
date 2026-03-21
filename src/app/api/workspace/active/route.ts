@@ -7,7 +7,7 @@ function redirectTo(url: URL, searchParams: Record<string, string>) {
     url.searchParams.set(key, value);
   }
 
-  return NextResponse.redirect(url);
+  return NextResponse.redirect(url, { status: 303 });
 }
 
 export async function POST(request: Request) {
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Workspace ID is required." }, { status: 400 });
     }
 
-    return redirectTo(new URL("/settings", request.url), {
+    return redirectTo(new URL("/settings/advanced", request.url), {
       status: "error",
       workspaceMessage: "Workspace ID is required.",
     });
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       return NextResponse.json(result);
     }
 
-    return redirectTo(new URL("/settings", request.url), {
+    return redirectTo(new URL("/settings/advanced", request.url), {
       status: "workspace-switched",
     });
   } catch (error) {
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: message }, { status: /denied/i.test(message) ? 403 : 500 });
     }
 
-    return redirectTo(new URL("/settings", request.url), {
+    return redirectTo(new URL("/settings/advanced", request.url), {
       status: "error",
       workspaceMessage: message,
     });

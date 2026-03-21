@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { hashToken } from "@/lib/crypto/tokens";
 import { requireSupabaseConfiguration } from "@/lib/supabase/env";
+import { cancelPendingCampaignJobs } from "@/services/campaign-send-queue-service";
 
 export async function GET(
   _request: Request,
@@ -27,6 +28,28 @@ export async function GET(
     .from("contacts")
     .update({ unsubscribed_at: new Date().toISOString() } as never)
     .eq("id", data.contact_id);
+
+  const { data: rawCampaignContacts } = await supabase
+    .from("campaign_contacts")
+    .select("id")
+    .eq("contact_id", data.contact_id);
+  const campaignContacts = (rawCampaignContacts ?? []) as Array<{ id: string }>;
+
+  if (campaignContacts.length) {
+    await supabase
+      .from("campaign_contacts")
+      .update({
+        status: "unsubscribed",
+        next_due_at: null,
+      } as never)
+      .eq("contact_id", data.contact_id);
+
+    for (const campaignContact of campaignContacts) {
+      await cancelPendingCampaignJobs(campaignContact.id, {
+        reason: "Recipient unsubscribed",
+      });
+    }
+  }
 
   return new NextResponse(
     "<html><body style='font-family:sans-serif;padding:40px'>You have been unsubscribed.</body></html>",

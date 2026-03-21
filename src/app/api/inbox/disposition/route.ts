@@ -3,6 +3,7 @@ import { getWorkspaceContext } from "@/lib/db/workspace";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { classifyReplyDisposition } from "@/lib/utils/reply-disposition";
 import { isAnyMissingColumnResult } from "@/lib/utils/supabase-schema";
+import { cancelPendingCampaignJobs } from "@/services/campaign-send-queue-service";
 import { recordMessageEvent } from "@/services/telemetry-service";
 
 function resolveStatus(disposition: string) {
@@ -82,6 +83,15 @@ export async function POST(request: Request) {
   if (updateResult.error) {
     return NextResponse.json({ error: updateResult.error.message || "Failed to update reply state." }, { status: 500 });
   }
+
+  await cancelPendingCampaignJobs(threadRecord.campaign_contact_id, {
+    reason:
+      replyDisposition === "negative"
+        ? "Manual negative reply update"
+        : replyDisposition === "booked"
+          ? "Manual meeting booked update"
+          : "Manual reply update",
+  });
 
   await recordMessageEvent({
     workspaceId: workspace.workspaceId,

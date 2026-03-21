@@ -13,10 +13,24 @@ const envSchema = z.object({
   HUBSPOT_CLIENT_ID: z.string().optional(),
   HUBSPOT_CLIENT_SECRET: z.string().optional(),
   HUBSPOT_OAUTH_REDIRECT_URI: z.string().optional(),
+  PIPEDRIVE_CLIENT_ID: z.string().optional(),
+  PIPEDRIVE_CLIENT_SECRET: z.string().optional(),
+  PIPEDRIVE_OAUTH_REDIRECT_URI: z.string().optional(),
+  ZOHO_CLIENT_ID: z.string().optional(),
+  ZOHO_CLIENT_SECRET: z.string().optional(),
+  ZOHO_OAUTH_REDIRECT_URI: z.string().optional(),
+  ZOHO_ACCOUNTS_BASE_URL: z.string().url().optional(),
+  ZOHO_API_BASE_URL: z.string().url().optional(),
   SALESFORCE_CLIENT_ID: z.string().optional(),
   SALESFORCE_CLIENT_SECRET: z.string().optional(),
   SALESFORCE_OAUTH_REDIRECT_URI: z.string().optional(),
   SALESFORCE_AUTH_BASE_URL: z.string().url().optional(),
+  SLACK_CLIENT_ID: z.string().optional(),
+  SLACK_CLIENT_SECRET: z.string().optional(),
+  SLACK_OAUTH_REDIRECT_URI: z.string().optional(),
+  CALENDLY_CLIENT_ID: z.string().optional(),
+  CALENDLY_CLIENT_SECRET: z.string().optional(),
+  CALENDLY_OAUTH_REDIRECT_URI: z.string().optional(),
   TOKEN_ENCRYPTION_KEY: z.string().min(32).optional(),
   CUSTOM_CRM_API_KEYS: z.string().optional(),
   SHARED_WORKSPACE_NAME: z.string().optional(),
@@ -41,10 +55,24 @@ const rawEnv = {
   HUBSPOT_CLIENT_ID: process.env.HUBSPOT_CLIENT_ID,
   HUBSPOT_CLIENT_SECRET: process.env.HUBSPOT_CLIENT_SECRET,
   HUBSPOT_OAUTH_REDIRECT_URI: process.env.HUBSPOT_OAUTH_REDIRECT_URI,
+  PIPEDRIVE_CLIENT_ID: process.env.PIPEDRIVE_CLIENT_ID,
+  PIPEDRIVE_CLIENT_SECRET: process.env.PIPEDRIVE_CLIENT_SECRET,
+  PIPEDRIVE_OAUTH_REDIRECT_URI: process.env.PIPEDRIVE_OAUTH_REDIRECT_URI,
+  ZOHO_CLIENT_ID: process.env.ZOHO_CLIENT_ID,
+  ZOHO_CLIENT_SECRET: process.env.ZOHO_CLIENT_SECRET,
+  ZOHO_OAUTH_REDIRECT_URI: process.env.ZOHO_OAUTH_REDIRECT_URI,
+  ZOHO_ACCOUNTS_BASE_URL: process.env.ZOHO_ACCOUNTS_BASE_URL,
+  ZOHO_API_BASE_URL: process.env.ZOHO_API_BASE_URL,
   SALESFORCE_CLIENT_ID: process.env.SALESFORCE_CLIENT_ID,
   SALESFORCE_CLIENT_SECRET: process.env.SALESFORCE_CLIENT_SECRET,
   SALESFORCE_OAUTH_REDIRECT_URI: process.env.SALESFORCE_OAUTH_REDIRECT_URI,
   SALESFORCE_AUTH_BASE_URL: process.env.SALESFORCE_AUTH_BASE_URL,
+  SLACK_CLIENT_ID: process.env.SLACK_CLIENT_ID,
+  SLACK_CLIENT_SECRET: process.env.SLACK_CLIENT_SECRET,
+  SLACK_OAUTH_REDIRECT_URI: process.env.SLACK_OAUTH_REDIRECT_URI,
+  CALENDLY_CLIENT_ID: process.env.CALENDLY_CLIENT_ID,
+  CALENDLY_CLIENT_SECRET: process.env.CALENDLY_CLIENT_SECRET,
+  CALENDLY_OAUTH_REDIRECT_URI: process.env.CALENDLY_OAUTH_REDIRECT_URI,
   TOKEN_ENCRYPTION_KEY: process.env.TOKEN_ENCRYPTION_KEY,
   CUSTOM_CRM_API_KEYS: process.env.CUSTOM_CRM_API_KEYS,
   SHARED_WORKSPACE_NAME: process.env.SHARED_WORKSPACE_NAME,
@@ -93,10 +121,30 @@ export const isHubSpotConfigured = Boolean(
     env.HUBSPOT_OAUTH_REDIRECT_URI,
 );
 
+export const isPipedriveConfigured = Boolean(
+  env.PIPEDRIVE_CLIENT_ID &&
+    env.PIPEDRIVE_CLIENT_SECRET,
+);
+
+export const isZohoConfigured = Boolean(
+  env.ZOHO_CLIENT_ID &&
+    env.ZOHO_CLIENT_SECRET,
+);
+
 export const isSalesforceConfigured = Boolean(
   env.SALESFORCE_CLIENT_ID &&
     env.SALESFORCE_CLIENT_SECRET &&
     env.SALESFORCE_OAUTH_REDIRECT_URI,
+);
+
+export const isSlackConfigured = Boolean(
+  env.SLACK_CLIENT_ID &&
+    env.SLACK_CLIENT_SECRET,
+);
+
+export const isCalendlyConfigured = Boolean(
+  env.CALENDLY_CLIENT_ID &&
+    env.CALENDLY_CLIENT_SECRET,
 );
 
 export function requireSupabaseConfiguration() {
@@ -111,6 +159,38 @@ export function requireGoogleConfiguration() {
   if (!isGoogleConfigured) {
     throw new Error(
       "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and TOKEN_ENCRYPTION_KEY.",
+    );
+  }
+}
+
+export function requirePipedriveConfiguration() {
+  if (!isPipedriveConfigured) {
+    throw new Error(
+      "Pipedrive OAuth is not configured. Set PIPEDRIVE_CLIENT_ID and PIPEDRIVE_CLIENT_SECRET.",
+    );
+  }
+}
+
+export function requireZohoConfiguration() {
+  if (!isZohoConfigured) {
+    throw new Error(
+      "Zoho OAuth is not configured. Set ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET.",
+    );
+  }
+}
+
+export function requireSlackConfiguration() {
+  if (!isSlackConfigured) {
+    throw new Error(
+      "Slack OAuth is not configured. Set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET.",
+    );
+  }
+}
+
+export function requireCalendlyConfiguration() {
+  if (!isCalendlyConfigured) {
+    throw new Error(
+      "Calendly OAuth is not configured. Set CALENDLY_CLIENT_ID and CALENDLY_CLIENT_SECRET.",
     );
   }
 }

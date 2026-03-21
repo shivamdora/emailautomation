@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Eye } from "lucide-react";
 import { useWatch, type UseFormReturn } from "react-hook-form";
 import { previewRenderedTemplate } from "@/lib/utils/template";
@@ -59,6 +59,7 @@ export function CampaignMessageCard({
     name: `workflowDefinition.steps.${index}` as never,
   }) as CampaignFormValues["workflowDefinition"]["steps"][number] | undefined;
   const mode = step?.mode ?? "text";
+  const [activeTab, setActiveTab] = useState<"write" | "preview">("preview");
   const preview = useMemo(
     () =>
       previewRenderedTemplate({
@@ -101,7 +102,7 @@ export function CampaignMessageCard({
       </CardHeader>
 
       <CardContent className="grid gap-5 p-5 sm:p-6">
-        <Tabs defaultValue="write" className="grid gap-4">
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "write" | "preview")} className="grid gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <TabsList className="w-fit">
               <TabsTrigger value="write">{creatorCopy.message.writeTab}</TabsTrigger>
@@ -178,18 +179,6 @@ export function CampaignMessageCard({
                       });
                     }}
                   />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor={`workflow-step-${index}-fallback`}>
-                    {creatorCopy.message.fallbackLabel}
-                  </Label>
-                  <Textarea
-                    id={`workflow-step-${index}-fallback`}
-                    className="min-h-40"
-                    placeholder={creatorCopy.message.fallbackPlaceholder}
-                    {...form.register(`workflowDefinition.steps.${index}.body` as never)}
-                  />
-                  <FieldError message={getStepFieldError(form, index, "body")} />
                 </div>
               </>
             ) : (

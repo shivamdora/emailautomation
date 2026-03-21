@@ -28,7 +28,9 @@ import {
   formatSendWindowSummary,
   getSendWindowPresetId,
   isAdvancedWorkflow,
+  matchesTemplateIntent,
   sendWindowPresets,
+  type CampaignTemplateIntent,
   type CampaignCreatorStepId,
 } from "@/lib/campaigns/creator";
 import {
@@ -36,6 +38,7 @@ import {
   buildDefaultWorkflowStep,
   type CampaignFormValues,
 } from "@/lib/campaigns/wizard-defaults";
+import type { TemplateListItem } from "@/lib/templates/gallery";
 import type { WorkflowStepInput } from "@/lib/workflows/definition";
 import { campaignBuilderSchema } from "@/lib/zod/schemas";
 import { creatorCopy, commonTimezoneOptions } from "@/components/campaigns/campaign-creator-copy";
@@ -60,20 +63,22 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LiquidSelect } from "@/components/ui/liquid-select";
 import { Textarea } from "@/components/ui/textarea";
 
 type StarterType = "template" | "scratch";
+type TemplateDialogState = {
+  open: boolean;
+  intent: CampaignTemplateIntent;
+  stepIndex: number;
+  title: string;
+  description: string;
+};
 
 type WizardProps = {
   gmailAccounts: Array<{ id: string; email_address: string }>;
   contacts: ContactRecord[];
-  templates: Array<{
-    id: string;
-    name: string;
-    subject_template: string;
-    body_template: string;
-    body_html_template?: string | null;
-  }>;
+  templates: TemplateListItem[];
   mode?: "create" | "edit";
   campaignId?: string;
   initialValues?: CampaignFormValues;
@@ -110,27 +115,50 @@ export function CampaignWizard({
     } satisfies CampaignFormValues;
   }, [contacts, gmailAccounts, initialSelectedTemplateId, initialValues, templates]);
 
-  const initialTemplateId = useMemo(() => {
+  const findMatchingTemplateId = useMemo(
+    () => (step: CampaignFormValues["workflowDefinition"]["steps"][number] | undefined, intent: CampaignTemplateIntent) => {
+      if (!step) {
+        return "";
+      }
+
+      const matchingTemplate = templates.find((template) => {
+        return (
+          matchesTemplateIntent(template, intent) &&
+          template.subject_template === step.subject &&
+          (template.body_html_template ?? "") === (step.bodyHtml ?? "") &&
+          (template.body_template ?? "") === (step.body ?? "")
+        );
+      });
+
+      return matchingTemplate?.id ?? "";
+    },
+    [templates],
+  );
+
+  const initialPrimaryTemplateId = useMemo(() => {
     if (initialSelectedTemplateId) {
       return initialSelectedTemplateId;
     }
 
-    const firstStep = resolvedInitialValues.workflowDefinition.steps[0];
-    const matchingTemplate = templates.find((template) => {
-      return (
-        template.subject_template === firstStep?.subject &&
-        (template.body_html_template ?? "") === (firstStep?.bodyHtml ?? "") &&
-        (template.body_template ?? "") === (firstStep?.body ?? "")
-      );
-    });
+    return findMatchingTemplateId(resolvedInitialValues.workflowDefinition.steps[0], "primary");
+  }, [findMatchingTemplateId, initialSelectedTemplateId, resolvedInitialValues.workflowDefinition.steps]);
 
-    return matchingTemplate?.id ?? "";
-  }, [initialSelectedTemplateId, resolvedInitialValues.workflowDefinition.steps, templates]);
+  const initialFollowUpTemplateId = useMemo(
+    () => findMatchingTemplateId(resolvedInitialValues.workflowDefinition.steps[1], "follow-up"),
+    [findMatchingTemplateId, resolvedInitialValues.workflowDefinition.steps],
+  );
 
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [starterType, setStarterType] = useState<StarterType>(initialTemplateId ? "template" : "scratch");
-  const [selectedTemplateId, setSelectedTemplateId] = useState(initialTemplateId);
-  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [starterType, setStarterType] = useState<StarterType>(initialPrimaryTemplateId ? "template" : "scratch");
+  const [selectedPrimaryTemplateId, setSelectedPrimaryTemplateId] = useState(initialPrimaryTemplateId);
+  const [selectedFollowUpTemplateId, setSelectedFollowUpTemplateId] = useState(initialFollowUpTemplateId);
+  const [templateDialogState, setTemplateDialogState] = useState<TemplateDialogState>({
+    open: false,
+    intent: "primary",
+    stepIndex: 0,
+    title: creatorCopy.start.templateDialogTitle,
+    description: creatorCopy.start.templateDialogDescription,
+  });
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
   const [contactQuery, setContactQuery] = useState("");
   const [starterError, setStarterError] = useState<string | null>(null);
@@ -201,7 +229,8 @@ export function CampaignWizard({
     };
   }, [availableContacts, targetContactIds]);
 
-  const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? null;
+  const selectedPrimaryTemplate = templates.find((template) => template.id === selectedPrimaryTemplateId) ?? null;
+  const selectedFollowUpTemplate = templates.find((template) => template.id === selectedFollowUpTemplateId) ?? null;
   const selectedSenderEmail =
     gmailAccounts.find((account) => account.id === gmailAccountId)?.email_address ?? null;
   const checklist = buildLaunchChecklist({
@@ -214,30 +243,50 @@ export function CampaignWizard({
   const sendWindowSummary = formatSendWindowSummary(timezone, sendWindowStart, sendWindowEnd);
   const sendWindowPresetId = getSendWindowPresetId(sendWindowStart, sendWindowEnd);
 
-  function applyTemplateToPrimaryStep(templateId: string) {
+  function openTemplateDialog(
+    intent: CampaignTemplateIntent,
+    stepIndex: number,
+    title: string,
+    description: string,
+  ) {
+    setTemplateDialogState({
+      open: true,
+      intent,
+      stepIndex,
+      title,
+      description,
+    });
+  }
+
+  function applyTemplateToStep(templateId: string) {
     const template = templates.find((item) => item.id === templateId);
     if (!template) {
       return;
     }
 
-    setStarterType("template");
-    setSelectedTemplateId(templateId);
-    setStarterError(null);
-    form.setValue(`workflowDefinition.steps.0.subject` as never, template.subject_template as never, {
+    if (templateDialogState.stepIndex === 0) {
+      setStarterType("template");
+      setSelectedPrimaryTemplateId(templateId);
+      setStarterError(null);
+    } else if (templateDialogState.stepIndex === 1) {
+      setSelectedFollowUpTemplateId(templateId);
+    }
+
+    form.setValue(`workflowDefinition.steps.${templateDialogState.stepIndex}.subject` as never, template.subject_template as never, {
       shouldDirty: true,
       shouldValidate: true,
     });
-    form.setValue(`workflowDefinition.steps.0.body` as never, (template.body_template ?? "") as never, {
+    form.setValue(`workflowDefinition.steps.${templateDialogState.stepIndex}.body` as never, (template.body_template ?? "") as never, {
       shouldDirty: true,
       shouldValidate: true,
     });
     form.setValue(
-      `workflowDefinition.steps.0.bodyHtml` as never,
+      `workflowDefinition.steps.${templateDialogState.stepIndex}.bodyHtml` as never,
       (template.body_html_template ?? "") as never,
       { shouldDirty: true, shouldValidate: true },
     );
     form.setValue(
-      `workflowDefinition.steps.0.mode` as never,
+      `workflowDefinition.steps.${templateDialogState.stepIndex}.mode` as never,
       (template.body_html_template ? "html" : "text") as never,
       { shouldDirty: true, shouldValidate: true },
     );
@@ -247,7 +296,7 @@ export function CampaignWizard({
   function resetPrimaryStepToScratch() {
     const defaultStep = buildDefaultWorkflowStep(0);
     setStarterType("scratch");
-    setSelectedTemplateId("");
+    setSelectedPrimaryTemplateId("");
     setStarterError(null);
     form.setValue(`workflowDefinition.steps.0.subject` as never, defaultStep.subject as never, { shouldDirty: true, shouldValidate: true });
     form.setValue(`workflowDefinition.steps.0.body` as never, defaultStep.body as never, { shouldDirty: true, shouldValidate: true });
@@ -289,7 +338,7 @@ export function CampaignWizard({
   async function validateCurrentStep() {
     if (activeStep.id === "start") {
       const validName = await form.trigger("campaignName");
-      if (starterType === "template" && !selectedTemplateId) {
+      if (starterType === "template" && !selectedPrimaryTemplateId) {
         setStarterError("Choose a template to continue.");
         return false;
       }
@@ -401,7 +450,7 @@ export function CampaignWizard({
 
   return (
     <>
-      <TemplateChooserDialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen} templates={templates} selectedTemplateId={selectedTemplateId} onSelect={applyTemplateToPrimaryStep} />
+      <TemplateChooserDialog open={templateDialogState.open} onOpenChange={(open) => setTemplateDialogState((current) => ({ ...current, open }))} templates={templates} selectedTemplateId={templateDialogState.stepIndex === 1 ? selectedFollowUpTemplateId : selectedPrimaryTemplateId} onSelect={applyTemplateToStep} intent={templateDialogState.intent} title={templateDialogState.title} description={templateDialogState.description} />
       <Dialog open={contactDialogOpen} onOpenChange={setContactDialogOpen}>
         <DialogContent className="max-h-[88vh] overflow-y-auto">
           <DialogHeader>
@@ -436,7 +485,7 @@ export function CampaignWizard({
 
               <details className="rounded-[1.6rem] border border-white/60 bg-white/40 p-4 md:hidden">
                 <summary className="cursor-pointer list-none text-sm font-semibold text-foreground">{creatorCopy.summary.title}</summary>
-                <SummaryRail className="mt-4 shadow-none" starterType={starterType} selectedTemplateName={selectedTemplate?.name ?? null} senderEmail={selectedSenderEmail} selectedContactsCount={targetContactIds.length} primarySubject={primaryStep?.subject ?? ""} followUpDelayDays={Number(primaryStep?.waitDays ?? 0)} sendWindowSummary={sendWindowSummary} dailySendLimit={dailySendLimit} sequenceCount={workflowSteps.length} checklist={checklist} onJump={jumpToStep} />
+                <SummaryRail className="mt-4 shadow-none" starterType={starterType} selectedTemplateName={selectedPrimaryTemplate?.name ?? null} senderEmail={selectedSenderEmail} selectedContactsCount={targetContactIds.length} primarySubject={primaryStep?.subject ?? ""} followUpDelayDays={Number(primaryStep?.waitDays ?? 0)} sendWindowSummary={sendWindowSummary} dailySendLimit={dailySendLimit} sequenceCount={workflowSteps.length} checklist={checklist} onJump={jumpToStep} />
               </details>
 
               <div key={activeStep.id} className="campaign-creator-panel grid gap-6">
@@ -449,14 +498,14 @@ export function CampaignWizard({
                 {activeStep.id === "start" ? (
                   <div className="grid gap-6">
                     <div className="grid gap-4 lg:grid-cols-2">
-                      <StarterCard active={starterType === "template"} icon={<Sparkles className="size-5" />} title={creatorCopy.start.templateTitle} description={creatorCopy.start.templateDescription} badge={selectedTemplate?.name} disabled={!templates.length} onClick={() => { setStarterType("template"); setTemplateDialogOpen(true); }} />
+                      <StarterCard active={starterType === "template"} icon={<Sparkles className="size-5" />} title={creatorCopy.start.templateTitle} description={creatorCopy.start.templateDescription} badge={selectedPrimaryTemplate?.name} disabled={!templates.some((template) => matchesTemplateIntent(template, "primary"))} onClick={() => { setStarterType("template"); openTemplateDialog("primary", 0, creatorCopy.start.templateDialogTitle, creatorCopy.start.templateDialogDescription); }} />
                       <StarterCard active={starterType === "scratch"} icon={<Mail className="size-5" />} title={creatorCopy.start.scratchTitle} description={creatorCopy.start.scratchDescription} onClick={resetPrimaryStepToScratch} />
                     </div>
                     <FieldError message={starterError ?? undefined} />
-                    {starterType === "template" && selectedTemplate ? <div className="rounded-[1.6rem] border border-white/70 bg-white/54 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="grid gap-1"><p className="text-base font-semibold text-foreground">{selectedTemplate.name}</p><p className="text-sm text-muted-foreground">{selectedTemplate.subject_template}</p></div><Button type="button" variant="outline" size="sm" onClick={() => setTemplateDialogOpen(true)}>Browse templates</Button></div><p className="mt-3 text-sm leading-6 text-muted-foreground">{getTemplateSnippet(selectedTemplate)}</p></div> : null}
+                    {starterType === "template" && selectedPrimaryTemplate ? <div className="rounded-[1.6rem] border border-white/70 bg-white/54 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="grid gap-1"><p className="text-base font-semibold text-foreground">{selectedPrimaryTemplate.name}</p><p className="text-sm text-muted-foreground">{selectedPrimaryTemplate.subject_template}</p></div><Button type="button" variant="outline" size="sm" onClick={() => openTemplateDialog("primary", 0, creatorCopy.start.templateDialogTitle, creatorCopy.start.templateDialogDescription)}>Browse templates</Button></div><p className="mt-3 text-sm leading-6 text-muted-foreground">{getTemplateSnippet(selectedPrimaryTemplate)}</p></div> : null}
                     <div className="grid gap-4 lg:grid-cols-2">
                       <div className="grid gap-2"><Label htmlFor="campaignName">{creatorCopy.start.campaignNameLabel}</Label><Input id="campaignName" placeholder={creatorCopy.start.campaignNamePlaceholder} {...form.register("campaignName")} /><FieldError message={typeof form.formState.errors.campaignName?.message === "string" ? form.formState.errors.campaignName.message : undefined} /></div>
-                      <div className="grid gap-2"><Label htmlFor="gmailAccountId">{creatorCopy.start.senderLabel}</Label><select id="gmailAccountId" className="glass-control h-12 appearance-none rounded-[1.15rem] border-0 px-4 text-sm shadow-none" {...form.register("gmailAccountId")}>{!hasMailbox ? <option value="">{creatorCopy.start.senderEmptyLabel}</option> : null}{gmailAccounts.map((account) => <option key={account.id} value={account.id}>{account.email_address}</option>)}</select><FieldError message={typeof form.formState.errors.gmailAccountId?.message === "string" ? form.formState.errors.gmailAccountId.message : undefined} />{!hasMailbox ? <div className="rounded-[1.45rem] border border-white/70 bg-white/54 p-4"><p className="font-semibold text-foreground">{creatorCopy.start.senderHelperTitle}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{creatorCopy.start.senderHelperBody}</p><div className="mt-3"><Button asChild variant="outline" size="sm"><Link href="/profile">{creatorCopy.start.senderHelperCta}</Link></Button></div></div> : null}</div>
+                      <div className="grid gap-2"><Label htmlFor="gmailAccountId">{creatorCopy.start.senderLabel}</Label><LiquidSelect id="gmailAccountId" ariaLabel={creatorCopy.start.senderLabel} value={gmailAccountId} onValueChange={(value) => form.setValue("gmailAccountId", value, { shouldDirty: true, shouldValidate: true })} disabled={!hasMailbox} placeholder={creatorCopy.start.senderEmptyLabel} triggerClassName="h-12 rounded-[1.15rem]" options={gmailAccounts.map((account) => ({ value: account.id, label: account.email_address, description: "Approved sender mailbox" }))} /><FieldError message={typeof form.formState.errors.gmailAccountId?.message === "string" ? form.formState.errors.gmailAccountId.message : undefined} />{!hasMailbox ? <div className="rounded-[1.45rem] border border-white/70 bg-white/54 p-4"><p className="font-semibold text-foreground">{creatorCopy.start.senderHelperTitle}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{creatorCopy.start.senderHelperBody}</p><div className="mt-3"><Button asChild variant="outline" size="sm"><Link href="/settings/sending">{creatorCopy.start.senderHelperCta}</Link></Button></div></div> : null}</div>
                     </div>
                   </div>
                 ) : null}
@@ -489,8 +538,8 @@ export function CampaignWizard({
                 ) : null}
                 {activeStep.id === "message" ? (
                   <div className="grid gap-5">
-                    <CampaignMessageCard form={form} index={0} label={creatorCopy.message.primaryLabel} description={creatorCopy.message.primaryDescription} previewContact={previewContact} sendDelayLabel={creatorCopy.message.sendImmediately} templateName={selectedTemplate?.name ?? null} onOpenTemplateChooser={() => setTemplateDialogOpen(true)} />
-                    <CampaignMessageCard form={form} index={1} label={creatorCopy.message.followUpLabel} description={creatorCopy.message.followUpDescription} previewContact={previewContact} sendDelayLabel={creatorCopy.message.sendAfter(Number(primaryStep?.waitDays ?? 0))} />
+                    <CampaignMessageCard form={form} index={0} label={creatorCopy.message.primaryLabel} description={creatorCopy.message.primaryDescription} previewContact={previewContact} sendDelayLabel={creatorCopy.message.sendImmediately} templateName={selectedPrimaryTemplate?.name ?? null} onOpenTemplateChooser={() => openTemplateDialog("primary", 0, "Choose the first email template", "Pick the opening email that should preload Email 1. You can still edit every line before launch.")} />
+                    <CampaignMessageCard form={form} index={1} label={creatorCopy.message.followUpLabel} description={creatorCopy.message.followUpDescription} previewContact={previewContact} sendDelayLabel={creatorCopy.message.sendAfter(Number(primaryStep?.waitDays ?? 0))} templateName={selectedFollowUpTemplate?.name ?? null} onOpenTemplateChooser={() => openTemplateDialog("follow-up", 1, "Choose the follow-up template", "Pick the follow-up email that should send after the opener. This list only shows follow-up templates.")} />
                     <div className="rounded-[1.75rem] border border-white/65 bg-white/44 p-5">
                       <button type="button" onClick={() => setAdvancedOpen((current) => !current)} className="flex w-full items-center justify-between gap-3 text-left">
                         <div className="space-y-1">
@@ -502,7 +551,7 @@ export function CampaignWizard({
                         </div>
                         <Button type="button" variant="ghost" size="sm">{advancedOpen ? "Hide" : "Show"}</Button>
                       </button>
-                      {advancedOpen ? <div className="mt-5 grid gap-4">{stepFields.fields.map((field, index) => { const step = typedWorkflowSteps[index]; return <div key={field.id} className="relative pl-7">{index < stepFields.fields.length - 1 ? <span className="absolute left-[11px] top-8 h-[calc(100%-1rem)] w-px bg-white/70" /> : null}<span className="absolute left-0 top-6 flex size-6 items-center justify-center rounded-full border border-white/72 bg-white/84 text-[11px] font-semibold text-accent-foreground">{index + 1}</span><div className="rounded-[1.5rem] border border-white/65 bg-white/58 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="space-y-1"><p className="text-base font-semibold text-foreground">{step?.name || `Step ${index + 1}`}</p><p className="text-sm leading-6 text-muted-foreground">{describeWorkflowRoute(step)}</p></div>{index >= 2 ? <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveStep(index)}>Remove</Button> : null}</div><div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4"><div className="grid gap-2 md:col-span-2"><Label htmlFor={`advanced-step-${index}-name`}>{creatorCopy.message.routeNameLabel}</Label><Input id={`advanced-step-${index}-name`} {...form.register(`workflowDefinition.steps.${index}.name` as never)} /></div><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-wait`}>{creatorCopy.message.routeDelayLabel}</Label><Input id={`advanced-step-${index}-wait`} type="number" min={0} max={30} {...form.register(`workflowDefinition.steps.${index}.waitDays` as never)} /></div><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-branch`}>{creatorCopy.message.routeBranchLabel}</Label><select id={`advanced-step-${index}-branch`} className="glass-control h-12 appearance-none rounded-[1.15rem] border-0 px-4 text-sm shadow-none" {...form.register(`workflowDefinition.steps.${index}.branchCondition` as never)}><option value="time">{creatorCopy.message.timeLabel}</option><option value="opened">{creatorCopy.message.openedLabel}</option><option value="clicked">{creatorCopy.message.clickedLabel}</option></select></div></div><div className="mt-4 grid gap-4 md:grid-cols-2"><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-match`}>{creatorCopy.message.routeMatchLabel}</Label><select id={`advanced-step-${index}-match`} className="glass-control h-12 appearance-none rounded-[1.15rem] border-0 px-4 text-sm shadow-none" {...form.register(`workflowDefinition.steps.${index}.onMatch` as never)}><option value="next_step">{creatorCopy.message.nextStepLabel}</option><option value="exit_sequence">{creatorCopy.message.exitLabel}</option></select></div><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-no-match`}>{creatorCopy.message.routeNoMatchLabel}</Label><select id={`advanced-step-${index}-no-match`} className="glass-control h-12 appearance-none rounded-[1.15rem] border-0 px-4 text-sm shadow-none" {...form.register(`workflowDefinition.steps.${index}.onNoMatch` as never)}><option value="next_step">{creatorCopy.message.nextStepLabel}</option><option value="exit_sequence">{creatorCopy.message.exitLabel}</option></select></div></div>{index < 2 ? <div className="mt-4 rounded-[1.35rem] border border-white/60 bg-white/52 px-4 py-3 text-sm text-muted-foreground">Message content for this step stays in the main editor above.</div> : <div className="mt-4 grid gap-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-foreground">{creatorCopy.message.advancedExtraStepHelper}</p><Button type="button" variant="ghost" size="sm" onClick={() => form.setValue(`workflowDefinition.steps.${index}.mode` as never, ((step?.mode ?? "text") === "html" ? "text" : "html") as never, { shouldDirty: true, shouldValidate: true })}>{(step?.mode ?? "text") === "html" ? creatorCopy.message.switchToText : creatorCopy.message.switchToHtml}</Button></div><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-subject`}>{creatorCopy.message.subjectLabel}</Label><Input id={`advanced-step-${index}-subject`} {...form.register(`workflowDefinition.steps.${index}.subject` as never)} /></div>{(step?.mode ?? "text") === "html" ? <><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-html`}>{creatorCopy.message.htmlBodyLabel}</Label><Textarea id={`advanced-step-${index}-html`} className="min-h-48 font-mono text-xs" {...form.register(`workflowDefinition.steps.${index}.bodyHtml` as never)} /></div><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-fallback`}>{creatorCopy.message.fallbackLabel}</Label><Textarea id={`advanced-step-${index}-fallback`} className="min-h-36" {...form.register(`workflowDefinition.steps.${index}.body` as never)} /></div></> : <div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-body`}>{creatorCopy.message.bodyLabel}</Label><Textarea id={`advanced-step-${index}-body`} className="min-h-48" {...form.register(`workflowDefinition.steps.${index}.body` as never)} /></div>}</div>}</div></div>; })}<div className="flex justify-end"><Button type="button" variant="outline" onClick={handleAddStep} disabled={stepFields.fields.length >= 5}><Plus className="size-4" />{creatorCopy.message.advancedAddStep}</Button></div></div> : null}
+                      {advancedOpen ? <div className="mt-5 grid gap-4">{stepFields.fields.map((field, index) => { const step = typedWorkflowSteps[index]; return <div key={field.id} className="relative pl-7">{index < stepFields.fields.length - 1 ? <span className="absolute left-[11px] top-8 h-[calc(100%-1rem)] w-px bg-white/70" /> : null}<span className="absolute left-0 top-6 flex size-6 items-center justify-center rounded-full border border-white/72 bg-white/84 text-[11px] font-semibold text-accent-foreground">{index + 1}</span><div className="rounded-[1.5rem] border border-white/65 bg-white/58 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="space-y-1"><p className="text-base font-semibold text-foreground">{step?.name || `Step ${index + 1}`}</p><p className="text-sm leading-6 text-muted-foreground">{describeWorkflowRoute(step)}</p></div>{index >= 2 ? <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveStep(index)}>Remove</Button> : null}</div><div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4"><div className="grid gap-2 md:col-span-2"><Label htmlFor={`advanced-step-${index}-name`}>{creatorCopy.message.routeNameLabel}</Label><Input id={`advanced-step-${index}-name`} {...form.register(`workflowDefinition.steps.${index}.name` as never)} /></div><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-wait`}>{creatorCopy.message.routeDelayLabel}</Label><Input id={`advanced-step-${index}-wait`} type="number" min={0} max={30} {...form.register(`workflowDefinition.steps.${index}.waitDays` as never)} /></div><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-branch`}>{creatorCopy.message.routeBranchLabel}</Label><LiquidSelect id={`advanced-step-${index}-branch`} ariaLabel={creatorCopy.message.routeBranchLabel} value={step?.branchCondition ?? "time"} onValueChange={(value) => form.setValue(`workflowDefinition.steps.${index}.branchCondition` as never, value as never, { shouldDirty: true, shouldValidate: true })} triggerClassName="h-12 rounded-[1.15rem]" options={[{ value: "time", label: creatorCopy.message.timeLabel, description: "Send after the wait period" }, { value: "opened", label: creatorCopy.message.openedLabel, description: "Only continue if they opened" }, { value: "clicked", label: creatorCopy.message.clickedLabel, description: "Only continue if they clicked" }]} /></div></div><div className="mt-4 grid gap-4 md:grid-cols-2"><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-match`}>{creatorCopy.message.routeMatchLabel}</Label><LiquidSelect id={`advanced-step-${index}-match`} ariaLabel={creatorCopy.message.routeMatchLabel} value={step?.onMatch ?? "next_step"} onValueChange={(value) => form.setValue(`workflowDefinition.steps.${index}.onMatch` as never, value as never, { shouldDirty: true, shouldValidate: true })} triggerClassName="h-12 rounded-[1.15rem]" options={[{ value: "next_step", label: creatorCopy.message.nextStepLabel, description: "Keep the sequence moving" }, { value: "exit_sequence", label: creatorCopy.message.exitLabel, description: "Stop this contact here" }]} /></div><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-no-match`}>{creatorCopy.message.routeNoMatchLabel}</Label><LiquidSelect id={`advanced-step-${index}-no-match`} ariaLabel={creatorCopy.message.routeNoMatchLabel} value={step?.onNoMatch ?? "next_step"} onValueChange={(value) => form.setValue(`workflowDefinition.steps.${index}.onNoMatch` as never, value as never, { shouldDirty: true, shouldValidate: true })} triggerClassName="h-12 rounded-[1.15rem]" options={[{ value: "next_step", label: creatorCopy.message.nextStepLabel, description: "Keep the sequence moving" }, { value: "exit_sequence", label: creatorCopy.message.exitLabel, description: "Stop this contact here" }]} /></div></div>{index < 2 ? <div className="mt-4 rounded-[1.35rem] border border-white/60 bg-white/52 px-4 py-3 text-sm text-muted-foreground">Message content for this step stays in the main editor above.</div> : <div className="mt-4 grid gap-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-foreground">{creatorCopy.message.advancedExtraStepHelper}</p><Button type="button" variant="ghost" size="sm" onClick={() => form.setValue(`workflowDefinition.steps.${index}.mode` as never, ((step?.mode ?? "text") === "html" ? "text" : "html") as never, { shouldDirty: true, shouldValidate: true })}>{(step?.mode ?? "text") === "html" ? creatorCopy.message.switchToText : creatorCopy.message.switchToHtml}</Button></div><div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-subject`}>{creatorCopy.message.subjectLabel}</Label><Input id={`advanced-step-${index}-subject`} {...form.register(`workflowDefinition.steps.${index}.subject` as never)} /></div>{(step?.mode ?? "text") === "html" ? <div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-html`}>{creatorCopy.message.htmlBodyLabel}</Label><Textarea id={`advanced-step-${index}-html`} className="min-h-48 font-mono text-xs" {...form.register(`workflowDefinition.steps.${index}.bodyHtml` as never)} /></div> : <div className="grid gap-2"><Label htmlFor={`advanced-step-${index}-body`}>{creatorCopy.message.bodyLabel}</Label><Textarea id={`advanced-step-${index}-body`} className="min-h-48" {...form.register(`workflowDefinition.steps.${index}.body` as never)} /></div>}</div>}</div></div>; })}<div className="flex justify-end"><Button type="button" variant="outline" onClick={handleAddStep} disabled={stepFields.fields.length >= 5}><Plus className="size-4" />{creatorCopy.message.advancedAddStep}</Button></div></div> : null}
                     </div>
                   </div>
                 ) : null}
@@ -554,7 +603,7 @@ export function CampaignWizard({
             </div>
           </div>
         </div>
-        <SummaryRail className="sticky top-6 hidden h-fit xl:block" starterType={starterType} selectedTemplateName={selectedTemplate?.name ?? null} senderEmail={selectedSenderEmail} selectedContactsCount={targetContactIds.length} primarySubject={primaryStep?.subject ?? ""} followUpDelayDays={Number(primaryStep?.waitDays ?? 0)} sendWindowSummary={sendWindowSummary} dailySendLimit={dailySendLimit} sequenceCount={workflowSteps.length} checklist={checklist} onJump={jumpToStep} />
+        <SummaryRail className="sticky top-6 hidden h-fit xl:block" starterType={starterType} selectedTemplateName={selectedPrimaryTemplate?.name ?? null} senderEmail={selectedSenderEmail} selectedContactsCount={targetContactIds.length} primarySubject={primaryStep?.subject ?? ""} followUpDelayDays={Number(primaryStep?.waitDays ?? 0)} sendWindowSummary={sendWindowSummary} dailySendLimit={dailySendLimit} sequenceCount={workflowSteps.length} checklist={checklist} onJump={jumpToStep} />
       </form>
     </>
   );

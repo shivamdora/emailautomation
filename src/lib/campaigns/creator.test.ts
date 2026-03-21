@@ -5,6 +5,7 @@ import {
   formatSendWindowSummary,
   getSendWindowPresetId,
   isAdvancedWorkflow,
+  matchesTemplateIntent,
 } from "@/lib/campaigns/creator";
 
 describe("campaign creator helpers", () => {
@@ -117,5 +118,31 @@ describe("campaign creator helpers", () => {
     expect(formatSendWindowSummary("Asia/Calcutta", "09:00", "17:00")).toBe(
       "09:00 - 17:00 (Asia/Calcutta)",
     );
+  });
+
+  it("separates opener templates from follow-up templates", () => {
+    expect(
+      matchesTemplateIntent(
+        {
+          name: "Meeting Booking Follow-up",
+          subject_template: "Worth a quick 15-minute chat for {{company}}?",
+          category: "follow-up",
+          tags: ["meeting-booking"],
+        },
+        "follow-up",
+      ),
+    ).toBe(true);
+
+    expect(
+      matchesTemplateIntent(
+        {
+          name: "Shelter Score Launch Template",
+          subject_template: "ShelterScore for Trusted Building Companies",
+          category: "launch",
+          tags: ["brand"],
+        },
+        "follow-up",
+      ),
+    ).toBe(false);
   });
 });

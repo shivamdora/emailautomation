@@ -3,7 +3,7 @@ import { getWorkspaceContext } from "@/lib/db/workspace";
 import { signOAuthState } from "@/lib/auth/oauth-state";
 import { getCRMAdapter, type CrmProvider } from "@/services/crm-adapters";
 
-const SUPPORTED_PROVIDERS = new Set<CrmProvider>(["hubspot", "salesforce"]);
+const SUPPORTED_PROVIDERS = new Set<CrmProvider>(["hubspot", "salesforce", "pipedrive", "zoho"]);
 
 export async function GET(
   request: Request,
