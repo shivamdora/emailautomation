@@ -246,20 +246,30 @@ type ProductContent = {
       nameLabel: string;
       subjectLabel: string;
       modeLabel: string;
+      writeTab: string;
       bodyLabel: string;
       htmlBodyLabel: string;
+      bodyHelper: string;
+      visualToolsLabel: string;
+      tokensLabel: string;
+      switchToHtmlLabel: string;
+      switchToTextLabel: string;
       importHtmlLabel: string;
-      fallbackLabel: string;
-      fallbackPlaceholder: string;
       saveLabel: string;
       savingLabel: string;
       successMessage: string;
       errorMessage: string;
       htmlTemplateBadge: string;
       textTemplateBadge: string;
+      autoDetectedBadge: string;
       importFileButtonLabel: string;
       previewSubjectLabel: string;
       previewBodyLabel: string;
+      livePreviewTitle: string;
+      livePreviewDescription: string;
+      previewDesktopLabel: string;
+      previewMobileLabel: string;
+      sampleContactLabel: string;
     };
   };
   campaigns: {
@@ -770,20 +780,31 @@ export const productContent: ProductContent = {
       nameLabel: "Template name",
       subjectLabel: "Subject",
       modeLabel: "Template mode",
+      writeTab: "Write",
       bodyLabel: "Body",
-      htmlBodyLabel: "HTML body",
+      htmlBodyLabel: "Designed email HTML",
+      bodyHelper: "Paste plain text or HTML. The preview updates automatically.",
+      visualToolsLabel: "Visual tools",
+      tokensLabel: "Quick tokens",
+      switchToHtmlLabel: "Switch to designed email",
+      switchToTextLabel: "Switch back to plain text",
       importHtmlLabel: "Import HTML file",
-      fallbackLabel: "Text fallback",
-      fallbackPlaceholder: "Optional plain-text fallback. Leave blank to auto-generate.",
       saveLabel: "Save template",
       savingLabel: "Saving...",
       successMessage: "Template saved",
       errorMessage: "Failed to save template",
       htmlTemplateBadge: "HTML template",
       textTemplateBadge: "Text template",
+      autoDetectedBadge: "Auto-detected HTML",
       importFileButtonLabel: "Import HTML file",
       previewSubjectLabel: "Subject",
       previewBodyLabel: "Body",
+      livePreviewTitle: "Live preview",
+      livePreviewDescription:
+        "Rendered with sample contact values so you can see how the template will feel before saving.",
+      previewDesktopLabel: "Desktop",
+      previewMobileLabel: "Mobile",
+      sampleContactLabel: "Previewing with Alina at Northstar.",
     },
   },
   campaigns: {

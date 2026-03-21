@@ -15,19 +15,24 @@ const PREVIEW_MIN_HEIGHT = {
 } as const;
 
 type EmailPreviewViewport = keyof typeof PREVIEW_WIDTH;
+type EmailPreviewPresentation = "thumbnail" | "reader";
 
 export function EmailPreviewFrame({
   html,
   viewport = "desktop",
+  presentation = "thumbnail",
   className,
   frameClassName,
   maxCanvasHeight,
+  viewportHeight,
 }: {
   html: string;
   viewport?: EmailPreviewViewport;
+  presentation?: EmailPreviewPresentation;
   className?: string;
   frameClassName?: string;
   maxCanvasHeight?: number;
+  viewportHeight?: number | string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -120,10 +125,55 @@ export function EmailPreviewFrame({
     };
   }, [srcDoc, viewport]);
 
+  const scaledWidth = Math.max(Math.round(previewWidth * scale), 1);
   const scaledHeight = Math.max(Math.round(documentHeight * scale), 120);
   const visibleHeight = maxCanvasHeight
     ? Math.min(maxCanvasHeight, scaledHeight)
     : Math.max(scaledHeight, PREVIEW_MIN_HEIGHT[viewport] * scale);
+  const resolvedReaderHeight = viewportHeight ?? "clamp(24rem, calc(88vh - 16rem), 56rem)";
+  const sharedFrameClassName = cn(
+    "bg-white transition-[transform] duration-200 ease-out",
+    presentation === "reader" ? "origin-top-left" : "origin-top",
+    frameClassName,
+  );
+
+  if (presentation === "reader") {
+    return (
+      <div ref={containerRef} className={cn("relative w-full", className)}>
+        <div
+          className="overflow-y-auto overflow-x-hidden rounded-[1.35rem] border border-white/70 bg-[linear-gradient(180deg,rgba(248,251,253,0.98),rgba(236,242,246,0.92))] p-4"
+          style={{ height: resolvedReaderHeight }}
+        >
+          <div className="flex min-w-full justify-center">
+            <div
+              className="relative"
+              style={{
+                width: scaledWidth,
+                height: scaledHeight,
+              }}
+            >
+              <div
+                className={sharedFrameClassName}
+                style={{
+                  width: previewWidth,
+                  height: documentHeight,
+                  transform: `scale(${scale})`,
+                }}
+              >
+                <iframe
+                  ref={iframeRef}
+                  title="Email template preview"
+                  sandbox="allow-same-origin"
+                  srcDoc={srcDoc}
+                  className="block h-full w-full border-0 bg-white"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -133,7 +183,7 @@ export function EmailPreviewFrame({
     >
       <div className="absolute left-1/2 top-0 -translate-x-1/2">
         <div
-          className={cn("origin-top transition-[transform] duration-200 ease-out", frameClassName)}
+          className={sharedFrameClassName}
           style={{
             width: previewWidth,
             height: documentHeight,
