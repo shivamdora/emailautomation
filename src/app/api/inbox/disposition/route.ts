@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { classifyReplyDisposition } from "@/lib/utils/reply-disposition";
 import { isAnyMissingColumnResult } from "@/lib/utils/supabase-schema";
+import { cancelPendingCampaignJobs } from "@/services/campaign-send-queue-service";
 import { recordMessageEvent } from "@/services/telemetry-service";
 
 function resolveStatus(disposition: string) {
@@ -83,12 +85,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: updateResult.error.message || "Failed to update reply state." }, { status: 500 });
   }
 
+  await cancelPendingCampaignJobs(threadRecord.campaign_contact_id, {
+    reason:
+      replyDisposition === "negative"
+        ? "Manual negative reply update"
+        : replyDisposition === "booked"
+          ? "Manual meeting booked update"
+          : "Manual reply update",
+  });
+
   await recordMessageEvent({
     workspaceId: workspace.workspaceId,
     campaignContactId: threadRecord.campaign_contact_id,
     eventType: replyDisposition === "negative" ? "unsubscribed" : replyDisposition === "booked" ? "meeting_booked" : "replied",
     metadata: { manualOverride: true, replyDisposition },
   });
+  await invalidateProjectReadModels(
+    {
+      userId: workspace.userId,
+      workspaceId: workspace.workspaceId,
+      projectId: workspace.activeProjectId,
+    },
+    {
+      includeWorkspace: true,
+      includeInbox: true,
+      threadId: threadRecordId,
+    },
+  );
 
   return NextResponse.json({ ok: true, replyDisposition, status });
 }

@@ -6,10 +6,12 @@ import { productContent } from "@/content/product";
 import { Button } from "@/components/ui/button";
 
 export function LiveRefresh({
+  autoRefresh = false,
   intervalMs = 60000,
   label = "Auto refresh while active",
   syncEndpoint,
 }: {
+  autoRefresh?: boolean;
   intervalMs?: number;
   label?: string;
   syncEndpoint?: string;
@@ -47,6 +49,10 @@ export function LiveRefresh({
   }
 
   useEffect(() => {
+    if (!autoRefresh) {
+      return;
+    }
+
     const refreshIfVisible = () => {
       if (document.visibilityState !== "visible") {
         return;
@@ -77,7 +83,7 @@ export function LiveRefresh({
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [intervalMs, router, startTransition]);
+  }, [autoRefresh, intervalMs, router, startTransition]);
 
   return (
     <div className="flex flex-wrap items-center gap-3">

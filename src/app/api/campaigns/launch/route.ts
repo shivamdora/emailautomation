@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { campaignLaunchSchema } from "@/lib/zod/schemas";
 import { createCampaign } from "@/services/campaign-service";
@@ -26,6 +27,14 @@ export async function POST(request: Request) {
     targetType: "campaign",
     targetId: result.id,
   });
+  await invalidateProjectReadModels(
+    {
+      userId: workspace.userId,
+      workspaceId: workspace.workspaceId,
+      projectId: workspace.activeProjectId,
+    },
+    { includeWorkspace: true },
+  );
 
   return NextResponse.json(result);
 }

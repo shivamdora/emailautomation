@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { bulkDeleteContactsSchema } from "@/lib/zod/schemas";
 import { bulkDeleteContacts } from "@/services/import-service";
@@ -27,6 +28,14 @@ export async function POST(request: Request) {
       targetId: payload.data.contactIds.join(","),
       metadata: { deletedCount: result.deletedCount },
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId: workspace.activeProjectId,
+      },
+      { includeWorkspace: true },
+    );
 
     return NextResponse.json(result);
   } catch (error) {

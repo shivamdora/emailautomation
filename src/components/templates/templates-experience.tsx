@@ -52,6 +52,8 @@ function TemplateSurface({
             key={`${template.id}-${viewport}-${fullPreview ? "full" : featured ? "featured" : "gallery"}`}
             html={template.body_html_template}
             viewport={viewport}
+            presentation={fullPreview ? "reader" : "thumbnail"}
+            viewportHeight={fullPreview ? "clamp(24rem, calc(88vh - 17rem), 58rem)" : undefined}
             maxCanvasHeight={maxCanvasHeight}
             className="rounded-[1.25rem]"
             frameClassName="overflow-hidden rounded-[1.25rem] bg-white shadow-[0_22px_48px_rgba(17,39,63,0.16)]"
@@ -189,7 +191,6 @@ export function TemplatesExperience({ templates }: { templates: TemplateListItem
       {isComposerOpen ? (
         <TemplateForm
           initialMode="text"
-          allowHtml={false}
           title="Create from scratch"
           onCancel={() => setIsComposerOpen(false)}
           onSaved={() => setIsComposerOpen(false)}
@@ -309,17 +310,23 @@ export function TemplatesExperience({ templates }: { templates: TemplateListItem
               </div>
             </DialogHeader>
 
-            <div className="grid max-h-[calc(88vh-12rem)] gap-4 overflow-y-auto px-6 py-5">
+            <div
+              className={`grid gap-4 px-6 py-5 ${
+                previewTemplate.body_html_template ? "overflow-hidden" : "max-h-[calc(88vh-12rem)] overflow-y-auto"
+              }`}
+            >
               <TemplateSurface
                 template={previewTemplate}
                 featured
                 fullPreview
                 viewport={previewViewport}
               />
-              <div className="rounded-[1.5rem] border border-dashed border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground">
-                {(previewTemplate.preview_text ?? previewTemplate.body_template.slice(0, 220)) ||
-                  productContent.shared.noBodyLabel}
-              </div>
+              {!previewTemplate.body_html_template ? (
+                <div className="rounded-[1.5rem] border border-dashed border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground">
+                  {(previewTemplate.preview_text ?? previewTemplate.body_template.slice(0, 220)) ||
+                    productContent.shared.noBodyLabel}
+                </div>
+              ) : null}
             </div>
 
             <DialogFooter className="border-t border-white/70 px-6 py-5">

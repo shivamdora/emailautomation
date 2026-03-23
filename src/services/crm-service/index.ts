@@ -16,6 +16,7 @@ import {
   assertWorkspaceCanCreateCrmConnection,
   refreshWorkspaceUsageCounters,
 } from "@/services/entitlement-service";
+import { emitWorkspaceIntegrationEvent } from "@/services/integration-event-service";
 
 function createSecret(prefix: string) {
   return `${prefix}_${randomBytes(20).toString("hex")}`;
@@ -620,6 +621,19 @@ export async function syncCrmConnection(connectionId: string) {
       status: "failed",
       errorMessage: message,
     });
+    try {
+      await emitWorkspaceIntegrationEvent({
+        workspaceId: connection.workspace_id,
+        eventType: "crm.sync_failed",
+        summary: `${connection.provider_account_label ?? connection.provider} sync failed.`,
+        metadata: {
+          provider: connection.provider,
+          error: message,
+        },
+      });
+    } catch (integrationError) {
+      console.error("Failed to emit CRM sync failure event", integrationError);
+    }
     throw error;
   }
 }

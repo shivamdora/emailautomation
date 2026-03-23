@@ -4,7 +4,7 @@ import { buildCampaignWizardInitialValues } from "@/lib/campaigns/wizard-default
 describe("buildCampaignWizardInitialValues", () => {
   it("loads the selected template into the first workflow step", () => {
     const values = buildCampaignWizardInitialValues({
-      gmailAccounts: [{ id: "mailbox-1", email_address: "jayant@example.com" }],
+      mailboxAccounts: [{ id: "mailbox-1", email_address: "jayant@example.com" }],
       contacts: [
         {
           id: "contact-1",

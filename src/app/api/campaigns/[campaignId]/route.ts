@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { campaignLaunchSchema } from "@/lib/zod/schemas";
 import { deleteCampaign, updateCampaign } from "@/services/campaign-service";
@@ -22,7 +23,7 @@ export async function PUT(
       projectId: workspace.activeProjectId,
       campaignId,
       campaignName: payload.data.campaignName,
-      gmailAccountId: payload.data.gmailAccountId,
+      mailboxAccountId: payload.data.mailboxAccountId,
       targetContactIds: payload.data.targetContactIds,
       timezone: payload.data.timezone,
       sendWindowStart: payload.data.sendWindowStart,
@@ -38,6 +39,14 @@ export async function PUT(
       targetType: "campaign",
       targetId: campaignId,
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId: workspace.activeProjectId,
+      },
+      { includeWorkspace: true },
+    );
 
     return NextResponse.json(result);
   } catch (error) {
@@ -62,6 +71,14 @@ export async function DELETE(
       targetType: "campaign",
       targetId: campaignId,
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId: workspace.activeProjectId,
+      },
+      { includeWorkspace: true },
+    );
 
     return NextResponse.json(result);
   } catch (error) {

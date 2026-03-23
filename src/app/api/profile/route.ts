@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { invalidateShell } from "@/lib/cache/namespaces";
+import { bootstrapWorkspaceForUser } from "@/lib/db/workspace";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { profileSchema } from "@/lib/zod/schemas";
 
@@ -62,6 +64,14 @@ export async function POST(request: Request) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+    if (payload.data.markOnboardingComplete) {
+      await bootstrapWorkspaceForUser({
+        id: user.id,
+        email: user.email ?? null,
+        user_metadata: (user.user_metadata as { full_name?: string | null } | null) ?? null,
+      });
+    }
+    await invalidateShell(user.id);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

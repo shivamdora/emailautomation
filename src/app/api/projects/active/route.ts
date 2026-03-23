@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProject, invalidateShell } from "@/lib/cache/namespaces";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { setActiveProject } from "@/services/project-service";
 
@@ -16,11 +17,17 @@ export async function POST(request: Request) {
   }
 
   try {
+    const previousProjectId = workspace.activeProjectId;
     const result = await setActiveProject({
       workspaceId: workspace.workspaceId,
       userId: workspace.userId,
       projectId,
     });
+    await Promise.all([
+      invalidateShell(workspace.userId),
+      invalidateProject(workspace.userId, workspace.workspaceId, previousProjectId),
+      invalidateProject(workspace.userId, workspace.workspaceId, projectId),
+    ]);
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to switch project.";

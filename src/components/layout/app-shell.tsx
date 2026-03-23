@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useSyncExternalStore } from "react";
-import { ArrowUpRight, LogOut, Sparkles } from "lucide-react";
+import { LogOut, Settings2, Sparkles } from "lucide-react";
 import { GmailMark } from "@/components/icons/gmail-mark";
 import { ProjectSwitcher } from "@/components/layout/project-switcher";
 import { SidebarNav } from "@/components/layout/sidebar-nav";
@@ -44,12 +44,14 @@ function getSidebarPreferenceSnapshot() {
 export function AppShell({
   children,
   brandSubtitle = productContent.shell.brand.subtitle,
+  shellTitle,
   activeProjectId,
   projects,
   workspaceName,
 }: {
   children: ReactNode;
   brandSubtitle?: string;
+  shellTitle?: string;
   activeProjectId: string;
   workspaceName: string;
   projects: Array<{
@@ -98,7 +100,7 @@ export function AppShell({
                 {productContent.shell.brand.name}
               </p>
               <p className="text-lg font-semibold tracking-[-0.05em] text-sidebar-foreground">
-                {brandSubtitle}
+                {shellTitle ?? brandSubtitle}
               </p>
             </Link>
             <form action="/api/auth/sign-out" method="post">
@@ -146,7 +148,7 @@ export function AppShell({
                       {productContent.shell.brand.name}
                     </p>
                     <p className="sidebar-brand-title text-[32px] font-semibold tracking-[-0.06em] text-sidebar-foreground">
-                      {brandSubtitle}
+                      {shellTitle ?? brandSubtitle}
                     </p>
                   </>
                 </Link>
@@ -194,7 +196,7 @@ export function AppShell({
             {isDesktopSidebarCollapsed ? (
               <div className="mt-5 grid justify-center gap-3">
                 <Link
-                  href="/profile"
+                  href="/settings/sending"
                   aria-label={productContent.profile.gmailCard.connectLabel}
                   title={productContent.profile.gmailCard.connectLabel}
                   className="glass-chip flex size-12 items-center justify-center rounded-[1.25rem] text-sidebar-foreground transition hover:-translate-y-0.5 hover:shadow-[0_18px_34px_rgba(17,39,63,0.12)]"
@@ -221,22 +223,22 @@ export function AppShell({
                   {productContent.shell.helper.description}
                 </p>
                 <div className="sidebar-helper-actions">
-                  <Link href="/profile" className="sidebar-helper-link group w-full">
-                    <span className="sidebar-helper-link-icon">
-                      <GmailMark className="size-5" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="sidebar-helper-link-kicker block font-mono text-[10px] uppercase tracking-[0.24em] text-sidebar-muted">
-                        Gmail setup
+                  <Button
+                    asChild
+                    type="button"
+                    variant="outline"
+                    className="sidebar-helper-button sidebar-helper-settings-button w-full justify-start"
+                  >
+                    <Link href="/settings">
+                      <span className="sidebar-helper-settings-icon">
+                        <span className="sidebar-helper-settings-orb" />
+                        <Settings2 className="size-4.5 text-[var(--accent-foreground)]" />
                       </span>
-                      <span className="sidebar-helper-link-label mt-1 block truncate text-sm font-semibold tracking-[-0.02em] text-sidebar-foreground">
-                        {productContent.profile.gmailCard.connectLabel}
+                      <span className="min-w-0 truncate">
+                        Work Settings
                       </span>
-                    </span>
-                    <span className="sidebar-helper-link-arrow">
-                      <ArrowUpRight className="size-4 shrink-0" />
-                    </span>
-                  </Link>
+                    </Link>
+                  </Button>
                   <form action="/api/auth/sign-out" method="post" className="sidebar-helper-form">
                     <Button
                       type="submit"

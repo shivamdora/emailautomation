@@ -246,20 +246,30 @@ type ProductContent = {
       nameLabel: string;
       subjectLabel: string;
       modeLabel: string;
+      writeTab: string;
       bodyLabel: string;
       htmlBodyLabel: string;
+      bodyHelper: string;
+      visualToolsLabel: string;
+      tokensLabel: string;
+      switchToHtmlLabel: string;
+      switchToTextLabel: string;
       importHtmlLabel: string;
-      fallbackLabel: string;
-      fallbackPlaceholder: string;
       saveLabel: string;
       savingLabel: string;
       successMessage: string;
       errorMessage: string;
       htmlTemplateBadge: string;
       textTemplateBadge: string;
+      autoDetectedBadge: string;
       importFileButtonLabel: string;
       previewSubjectLabel: string;
       previewBodyLabel: string;
+      livePreviewTitle: string;
+      livePreviewDescription: string;
+      previewDesktopLabel: string;
+      previewMobileLabel: string;
+      sampleContactLabel: string;
     };
   };
   campaigns: {
@@ -487,6 +497,10 @@ export const productContent: ProductContent = {
         label: "Contacts",
         children: [{ href: "/imports", label: "Import Contact" }],
       },
+      {
+        href: "/profile",
+        label: "Profile",
+      },
     ],
     helper: {
       title: "Project quick actions",
@@ -599,7 +613,7 @@ export const productContent: ProductContent = {
     chartTitle: "Reply rate by campaign",
     checklistTitle: "Launch checklist",
     checklist: [
-      "Connect a Gmail mailbox from Profile.",
+      "Connect a Gmail mailbox from Settings > Sending.",
       "Import contacts from a CSV, XLSX, or public Google Sheet.",
       "Save at least one reusable template.",
       "Launch a campaign and keep this page open while sends and replies sync.",
@@ -766,20 +780,31 @@ export const productContent: ProductContent = {
       nameLabel: "Template name",
       subjectLabel: "Subject",
       modeLabel: "Template mode",
+      writeTab: "Write",
       bodyLabel: "Body",
-      htmlBodyLabel: "HTML body",
+      htmlBodyLabel: "Designed email HTML",
+      bodyHelper: "Paste plain text or HTML. The preview updates automatically.",
+      visualToolsLabel: "Visual tools",
+      tokensLabel: "Quick tokens",
+      switchToHtmlLabel: "Switch to designed email",
+      switchToTextLabel: "Switch back to plain text",
       importHtmlLabel: "Import HTML file",
-      fallbackLabel: "Text fallback",
-      fallbackPlaceholder: "Optional plain-text fallback. Leave blank to auto-generate.",
       saveLabel: "Save template",
       savingLabel: "Saving...",
       successMessage: "Template saved",
       errorMessage: "Failed to save template",
       htmlTemplateBadge: "HTML template",
       textTemplateBadge: "Text template",
+      autoDetectedBadge: "Auto-detected HTML",
       importFileButtonLabel: "Import HTML file",
       previewSubjectLabel: "Subject",
       previewBodyLabel: "Body",
+      livePreviewTitle: "Live preview",
+      livePreviewDescription:
+        "Rendered with sample contact values so you can see how the template will feel before saving.",
+      previewDesktopLabel: "Desktop",
+      previewMobileLabel: "Mobile",
+      sampleContactLabel: "Previewing with Alina at Northstar.",
     },
   },
   campaigns: {
@@ -791,8 +816,8 @@ export const productContent: ProductContent = {
     },
     newCampaign: {
       eyebrow: "Campaign builder",
-      title: "Launch a campaign",
-      description: "Choose the sender, audience, schedule, and workflow in one place.",
+      title: "Create a campaign",
+      description: "Choose a starting point, pick the audience, shape the message, and launch with confidence.",
     },
     editCampaign: {
       eyebrow: "Campaign editor",
@@ -844,8 +869,8 @@ export const productContent: ProductContent = {
       senderEmptyLabel: "No mailbox connected",
       senderHelperTitle: "Connect Gmail before launch",
       senderHelperDescription:
-        "This project does not have a connected Gmail mailbox yet. Connect one from Profile before you launch or send.",
-      senderHelperCta: "Open Profile",
+        "This project does not have a connected Gmail mailbox yet. Connect one from Settings > Sending before you launch or send.",
+      senderHelperCta: "Open Settings",
       targetContactsLabel: "Target contacts",
       targetContactsSummary: (count) => `${count} selected across the full list`,
       searchContactsPlaceholder: "Search by email, name, company, title, or tag",
@@ -944,7 +969,7 @@ export const productContent: ProductContent = {
     header: {
       eyebrow: "Profile",
       title: "Personal settings",
-      description: "Keep your profile current, review project branding, and connect the Gmail mailboxes you send from.",
+      description: "Keep your personal identity current, then jump into sender setup and project branding from Settings.",
     },
     banners: {
       connected: "Gmail mailbox connected successfully.",

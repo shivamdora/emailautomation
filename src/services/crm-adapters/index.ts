@@ -1,8 +1,14 @@
 import "server-only";
 import { decryptToken, encryptToken } from "@/lib/crypto/tokens";
-import { env, isHubSpotConfigured, isSalesforceConfigured } from "@/lib/supabase/env";
+import {
+  env,
+  isHubSpotConfigured,
+  isPipedriveConfigured,
+  isSalesforceConfigured,
+  isZohoConfigured,
+} from "@/lib/supabase/env";
 
-export type CrmProvider = "custom_crm" | "hubspot" | "salesforce";
+export type CrmProvider = "custom_crm" | "hubspot" | "salesforce" | "pipedrive" | "zoho";
 
 export type CrmConnectionRecord = {
   id: string;
@@ -150,6 +156,84 @@ async function getSalesforceAccessToken(connection: CrmConnectionRecord) {
   return token.access_token;
 }
 
+function getPipedriveScopes() {
+  return ["base", "contacts:read", "contacts:full"];
+}
+
+function getZohoScopes() {
+  return ["ZohoCRM.modules.ALL", "ZohoCRM.users.READ", "offline_access"];
+}
+
+function getZohoAccountsBaseUrl() {
+  return env.ZOHO_ACCOUNTS_BASE_URL ?? "https://accounts.zoho.com";
+}
+
+async function getPipedriveAccessToken(connection: CrmConnectionRecord) {
+  const tokenEncrypted = connection.access_token_encrypted;
+  const expiry = connection.token_expiry ? new Date(connection.token_expiry).getTime() : null;
+
+  if (tokenEncrypted && (!expiry || expiry > Date.now() + 60_000)) {
+    return decryptToken(tokenEncrypted);
+  }
+
+  if (!connection.refresh_token_encrypted || !env.PIPEDRIVE_CLIENT_ID || !env.PIPEDRIVE_CLIENT_SECRET) {
+    throw new Error("Pipedrive connection is missing a refresh token.");
+  }
+
+  const response = await fetch("https://oauth.pipedrive.com/oauth/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(
+        `${env.PIPEDRIVE_CLIENT_ID}:${env.PIPEDRIVE_CLIENT_SECRET}`,
+      ).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: decryptToken(connection.refresh_token_encrypted),
+    }),
+  });
+  const token = await parseJsonResponse<{
+    access_token: string;
+    refresh_token?: string;
+    expires_in?: number;
+  }>(response, "Pipedrive token refresh");
+
+  return token.access_token;
+}
+
+async function getZohoAccessToken(connection: CrmConnectionRecord) {
+  const tokenEncrypted = connection.access_token_encrypted;
+  const expiry = connection.token_expiry ? new Date(connection.token_expiry).getTime() : null;
+
+  if (tokenEncrypted && (!expiry || expiry > Date.now() + 60_000)) {
+    return decryptToken(tokenEncrypted);
+  }
+
+  if (!connection.refresh_token_encrypted || !env.ZOHO_CLIENT_ID || !env.ZOHO_CLIENT_SECRET) {
+    throw new Error("Zoho connection is missing a refresh token.");
+  }
+
+  const response = await fetch(`${getZohoAccountsBaseUrl()}/oauth/v2/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: env.ZOHO_CLIENT_ID,
+      client_secret: env.ZOHO_CLIENT_SECRET,
+      refresh_token: decryptToken(connection.refresh_token_encrypted),
+    }),
+  });
+  const token = await parseJsonResponse<{
+    access_token: string;
+    expires_in?: number;
+  }>(response, "Zoho token refresh");
+
+  return token.access_token;
+}
+
 function getHubSpotScopes() {
   return [
     "oauth",
@@ -198,6 +282,72 @@ async function fetchSalesforceIdentity(accessToken: string, identityUrl: string 
     display_name?: string;
     email?: string;
   };
+}
+
+async function fetchPipedriveCurrentUser(accessToken: string, apiDomain: string | null | undefined) {
+  if (!apiDomain) {
+    return {};
+  }
+
+  const response = await fetch(`${apiDomain}/api/v1/users/me`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    return {};
+  }
+
+  const payload = (await response.json()) as {
+    data?: {
+      id?: number | string | null;
+      name?: string | null;
+      email?: string | null;
+      company_name?: string | null;
+    } | null;
+  };
+
+  return payload.data ?? {};
+}
+
+async function fetchZohoCurrentUser(accessToken: string, apiDomain: string | null | undefined) {
+  if (!apiDomain) {
+    return {};
+  }
+
+  const response = await fetch(`${apiDomain}/crm/v8/users?type=CurrentUser`, {
+    headers: {
+      Authorization: `Zoho-oauthtoken ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    return {};
+  }
+
+  const payload = (await response.json()) as {
+    users?: Array<{
+      id?: string | null;
+      full_name?: string | null;
+      email?: string | null;
+      zuid?: string | null;
+    }> | null;
+    users_details?: Array<{
+      id?: string | null;
+      full_name?: string | null;
+      email?: string | null;
+      zuid?: string | null;
+    }> | null;
+    data?: Array<{
+      id?: string | null;
+      full_name?: string | null;
+      email?: string | null;
+      zuid?: string | null;
+    }> | null;
+  };
+
+  return payload.users?.[0] ?? payload.users_details?.[0] ?? payload.data?.[0] ?? {};
 }
 
 async function createHubSpotNote(accessToken: string, externalContactId: string, summary: string) {
@@ -262,6 +412,98 @@ async function createSalesforceTask(connection: CrmConnectionRecord, accessToken
       }),
     }),
     "Salesforce task writeback",
+  );
+}
+
+async function createPipedriveNote(apiDomain: string, accessToken: string, personId: string, summary: string) {
+  await parseJsonResponse(
+    await fetch(`${apiDomain}/api/v1/notes`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        content: summary,
+        person_id: Number(personId),
+      }),
+    }),
+    "Pipedrive note writeback",
+  );
+}
+
+async function updatePipedrivePerson(
+  apiDomain: string,
+  accessToken: string,
+  personId: string,
+  fields: Record<string, unknown>,
+) {
+  await parseJsonResponse(
+    await fetch(`${apiDomain}/api/v1/persons/${personId}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(fields),
+    }),
+    "Pipedrive person update",
+  );
+}
+
+async function createZohoNote(
+  apiDomain: string,
+  accessToken: string,
+  moduleName: string,
+  recordId: string,
+  summary: string,
+) {
+  await parseJsonResponse(
+    await fetch(`${apiDomain}/crm/v8/Notes`, {
+      method: "POST",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        data: [
+          {
+            Note_Title: "OutboundFlow activity",
+            Note_Content: summary,
+            Parent_Id: recordId,
+            se_module: moduleName,
+          },
+        ],
+      }),
+    }),
+    "Zoho note writeback",
+  );
+}
+
+async function updateZohoRecord(
+  apiDomain: string,
+  accessToken: string,
+  moduleName: string,
+  recordId: string,
+  fields: Record<string, unknown>,
+) {
+  await parseJsonResponse(
+    await fetch(`${apiDomain}/crm/v8/${moduleName}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        data: [
+          {
+            id: recordId,
+            ...fields,
+          },
+        ],
+      }),
+    }),
+    "Zoho record update",
   );
 }
 
@@ -624,10 +866,372 @@ const salesforceAdapter: CRMAdapter = {
   },
 };
 
+const pipedriveAdapter: CRMAdapter = {
+  provider: "pipedrive",
+  isConfigured() {
+    return isPipedriveConfigured;
+  },
+  getConnectUrl(state, redirectUri) {
+    if (!env.PIPEDRIVE_CLIENT_ID) {
+      throw new Error("Pipedrive OAuth is not configured.");
+    }
+
+    const url = new URL("https://oauth.pipedrive.com/oauth/authorize");
+    url.searchParams.set("client_id", env.PIPEDRIVE_CLIENT_ID);
+    url.searchParams.set("redirect_uri", redirectUri);
+    url.searchParams.set("state", state);
+    url.searchParams.set("scope", getPipedriveScopes().join(" "));
+    return url.toString();
+  },
+  async exchangeCode(code, redirectUri) {
+    const response = await fetch("https://oauth.pipedrive.com/oauth/token", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(
+          `${env.PIPEDRIVE_CLIENT_ID ?? ""}:${env.PIPEDRIVE_CLIENT_SECRET ?? ""}`,
+        ).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: redirectUri,
+      }),
+    });
+    const token = await parseJsonResponse<{
+      access_token: string;
+      refresh_token?: string;
+      expires_in?: number;
+      api_domain?: string;
+      company_domain?: string;
+    }>(response, "Pipedrive token exchange");
+    const apiDomain =
+      token.api_domain?.replace(/\/$/, "") ||
+      (token.company_domain ? `https://${token.company_domain}.pipedrive.com` : "");
+    const identity = await fetchPipedriveCurrentUser(token.access_token, apiDomain || null);
+
+    return {
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token ?? null,
+      tokenExpiry: token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null,
+      providerAccountId: identity.id ? String(identity.id) : token.company_domain ?? null,
+      providerAccountLabel: identity.company_name ?? identity.name ?? "Pipedrive",
+      providerAccountEmail: identity.email ?? null,
+      connectionMetadata: {
+        apiDomain,
+        companyDomain: token.company_domain ?? null,
+        scopes: getPipedriveScopes(),
+      },
+    };
+  },
+  async refreshToken(connection) {
+    const response = await fetch("https://oauth.pipedrive.com/oauth/token", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(
+          `${env.PIPEDRIVE_CLIENT_ID ?? ""}:${env.PIPEDRIVE_CLIENT_SECRET ?? ""}`,
+        ).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: connection.refresh_token_encrypted
+          ? decryptToken(connection.refresh_token_encrypted)
+          : "",
+      }),
+    });
+    const token = await parseJsonResponse<{
+      access_token: string;
+      refresh_token?: string;
+      expires_in?: number;
+      api_domain?: string;
+      company_domain?: string;
+    }>(response, "Pipedrive token refresh");
+
+    return {
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token ?? null,
+      tokenExpiry: token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null,
+      connectionMetadata: {
+        ...(connection.connection_metadata_jsonb ?? {}),
+        apiDomain: token.api_domain ?? connection.connection_metadata_jsonb?.apiDomain ?? null,
+        companyDomain: token.company_domain ?? connection.connection_metadata_jsonb?.companyDomain ?? null,
+      },
+    };
+  },
+  async pullSync(connection) {
+    const accessToken = await getPipedriveAccessToken(connection);
+    const apiDomain = String(connection.connection_metadata_jsonb?.apiDomain ?? "");
+
+    if (!apiDomain) {
+      throw new Error("Pipedrive connection is missing an API domain.");
+    }
+
+    const start = Number(connection.sync_cursor_jsonb?.start ?? 0);
+    const url = new URL(`${apiDomain}/api/v1/persons`);
+    url.searchParams.set("limit", "200");
+    url.searchParams.set("start", String(Math.max(start, 0)));
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    const payload = await parseJsonResponse<{
+      data?: Array<{
+        id: number | string;
+        name?: string | null;
+        first_name?: string | null;
+        last_name?: string | null;
+        email?: Array<{ value?: string | null; primary?: boolean | null }> | null;
+        org_id?: { name?: string | null } | number | string | null;
+      }> | null;
+      additional_data?: {
+        pagination?: {
+          more_items_in_collection?: boolean;
+          next_start?: number | null;
+        } | null;
+      } | null;
+    }>(response, "Pipedrive person sync");
+
+    return {
+      contacts: (payload.data ?? [])
+        .map((person) => {
+          const primaryEmail =
+            person.email?.find((entry) => entry.primary && entry.value)?.value ??
+            person.email?.find((entry) => entry.value)?.value ??
+            "";
+
+          return {
+            externalId: String(person.id),
+            email: String(primaryEmail ?? "").trim(),
+            firstName: person.first_name ?? null,
+            lastName: person.last_name ?? null,
+            company:
+              typeof person.org_id === "object" && person.org_id
+                ? person.org_id.name ?? null
+                : null,
+            website: null,
+            jobTitle: null,
+          };
+        })
+        .filter((contact) => Boolean(contact.email)),
+      nextCursor: payload.additional_data?.pagination?.more_items_in_collection
+        ? { start: payload.additional_data.pagination.next_start ?? start + 200 }
+        : null,
+      providerAccountId: connection.provider_account_id ?? null,
+      providerAccountLabel: connection.provider_account_label ?? "Pipedrive",
+      providerAccountEmail: connection.provider_account_email ?? null,
+    };
+  },
+  async writeback(connection, payload) {
+    if (!payload.externalContactId) {
+      return;
+    }
+
+    const apiDomain = String(connection.connection_metadata_jsonb?.apiDomain ?? "");
+
+    if (!apiDomain) {
+      throw new Error("Pipedrive connection is missing an API domain.");
+    }
+
+    const accessToken = await getPipedriveAccessToken(connection);
+    await createPipedriveNote(apiDomain, accessToken, payload.externalContactId, payload.summary);
+    const statusField = String(connection.field_mapping_jsonb?.statusField ?? "").trim();
+
+    if (statusField) {
+      await updatePipedrivePerson(apiDomain, accessToken, payload.externalContactId, {
+        [statusField]: payload.eventType,
+      });
+    }
+  },
+};
+
+const zohoAdapter: CRMAdapter = {
+  provider: "zoho",
+  isConfigured() {
+    return isZohoConfigured;
+  },
+  getConnectUrl(state, redirectUri) {
+    if (!env.ZOHO_CLIENT_ID) {
+      throw new Error("Zoho OAuth is not configured.");
+    }
+
+    const url = new URL(`${getZohoAccountsBaseUrl()}/oauth/v2/auth`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", env.ZOHO_CLIENT_ID);
+    url.searchParams.set("redirect_uri", redirectUri);
+    url.searchParams.set("scope", getZohoScopes().join(","));
+    url.searchParams.set("access_type", "offline");
+    url.searchParams.set("prompt", "consent");
+    url.searchParams.set("state", state);
+    return url.toString();
+  },
+  async exchangeCode(code, redirectUri) {
+    const response = await fetch(`${getZohoAccountsBaseUrl()}/oauth/v2/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: env.ZOHO_CLIENT_ID ?? "",
+        client_secret: env.ZOHO_CLIENT_SECRET ?? "",
+        redirect_uri: redirectUri,
+        code,
+      }),
+    });
+    const token = await parseJsonResponse<{
+      access_token: string;
+      refresh_token?: string;
+      api_domain?: string;
+      expires_in?: number;
+    }>(response, "Zoho token exchange");
+    const apiDomain = token.api_domain ?? env.ZOHO_API_BASE_URL ?? "";
+    const identity = await fetchZohoCurrentUser(token.access_token, apiDomain || null);
+
+    return {
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token ?? null,
+      tokenExpiry: token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null,
+      providerAccountId: identity.id ?? identity.zuid ?? null,
+      providerAccountLabel: identity.full_name ?? "Zoho CRM",
+      providerAccountEmail: identity.email ?? null,
+      connectionMetadata: {
+        apiDomain,
+        scopes: getZohoScopes(),
+      },
+    };
+  },
+  async refreshToken(connection) {
+    const response = await fetch(`${getZohoAccountsBaseUrl()}/oauth/v2/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: env.ZOHO_CLIENT_ID ?? "",
+        client_secret: env.ZOHO_CLIENT_SECRET ?? "",
+        refresh_token: connection.refresh_token_encrypted
+          ? decryptToken(connection.refresh_token_encrypted)
+          : "",
+      }),
+    });
+    const token = await parseJsonResponse<{
+      access_token: string;
+      expires_in?: number;
+      api_domain?: string;
+    }>(response, "Zoho token refresh");
+
+    return {
+      accessToken: token.access_token,
+      tokenExpiry: token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null,
+      connectionMetadata: {
+        ...(connection.connection_metadata_jsonb ?? {}),
+        apiDomain: token.api_domain ?? connection.connection_metadata_jsonb?.apiDomain ?? env.ZOHO_API_BASE_URL ?? null,
+      },
+    };
+  },
+  async pullSync(connection) {
+    const accessToken = await getZohoAccessToken(connection);
+    const apiDomain = String(connection.connection_metadata_jsonb?.apiDomain ?? env.ZOHO_API_BASE_URL ?? "");
+
+    if (!apiDomain) {
+      throw new Error("Zoho connection is missing an API domain.");
+    }
+
+    const moduleName = String(connection.sync_cursor_jsonb?.module ?? "Contacts");
+    const page = Number(connection.sync_cursor_jsonb?.page ?? 1);
+    const fields =
+      moduleName === "Leads"
+        ? "Email,First_Name,Last_Name,Company,Designation,Website"
+        : "Email,First_Name,Last_Name,Account_Name,Title,Website";
+    const url = new URL(`${apiDomain}/crm/v8/${moduleName}`);
+    url.searchParams.set("fields", fields);
+    url.searchParams.set("page", String(Math.max(page, 1)));
+    url.searchParams.set("per_page", "200");
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+      },
+    });
+    const payload = await parseJsonResponse<{
+      data?: Array<Record<string, unknown>>;
+      info?: {
+        more_records?: boolean;
+      } | null;
+    }>(response, "Zoho contact sync");
+
+    const contacts = (payload.data ?? [])
+      .map((record) => {
+        const account = record.Account_Name as { name?: string | null } | string | null | undefined;
+
+        return {
+          externalId: `${moduleName}:${String(record.id ?? "")}`,
+          email: String(record.Email ?? "").trim(),
+          firstName: (record.First_Name as string | null | undefined) ?? null,
+          lastName: (record.Last_Name as string | null | undefined) ?? null,
+          company:
+            moduleName === "Leads"
+              ? ((record.Company as string | null | undefined) ?? null)
+              : typeof account === "object" && account
+                ? account.name ?? null
+                : typeof account === "string"
+                  ? account
+                  : null,
+          website: (record.Website as string | null | undefined) ?? null,
+          jobTitle:
+            moduleName === "Leads"
+              ? ((record.Designation as string | null | undefined) ?? null)
+              : ((record.Title as string | null | undefined) ?? null),
+        };
+      })
+      .filter((contact) => Boolean(contact.email));
+
+    return {
+      contacts,
+      nextCursor: payload.info?.more_records
+        ? { module: moduleName, page: page + 1 }
+        : moduleName === "Contacts"
+          ? { module: "Leads", page: 1 }
+          : null,
+      providerAccountId: connection.provider_account_id ?? null,
+      providerAccountLabel: connection.provider_account_label ?? "Zoho CRM",
+      providerAccountEmail: connection.provider_account_email ?? null,
+    };
+  },
+  async writeback(connection, payload) {
+    if (!payload.externalContactId) {
+      return;
+    }
+
+    const [moduleName, recordId] = String(payload.externalContactId).split(":");
+    const apiDomain = String(connection.connection_metadata_jsonb?.apiDomain ?? env.ZOHO_API_BASE_URL ?? "");
+
+    if (!apiDomain || !moduleName || !recordId) {
+      throw new Error("Zoho writeback is missing record metadata.");
+    }
+
+    const accessToken = await getZohoAccessToken(connection);
+    await createZohoNote(apiDomain, accessToken, moduleName, recordId, payload.summary);
+    const statusField = String(connection.field_mapping_jsonb?.statusField ?? "").trim();
+
+    if (statusField) {
+      await updateZohoRecord(apiDomain, accessToken, moduleName, recordId, {
+        [statusField]: payload.eventType,
+      });
+    }
+  },
+};
+
 const registry: Record<CrmProvider, CRMAdapter> = {
   custom_crm: customCrmAdapter,
   hubspot: hubspotAdapter,
+  pipedrive: pipedriveAdapter,
   salesforce: salesforceAdapter,
+  zoho: zohoAdapter,
 };
 
 export function getCRMAdapter(provider: CrmProvider) {

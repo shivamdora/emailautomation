@@ -13,26 +13,53 @@ export type CampaignTemplateOption = {
 
 export function buildDefaultWorkflowStep(index: number): CampaignFormValues["workflowDefinition"]["steps"][number] {
   const stepNumber = index + 1;
-  const isFinal = stepNumber >= 2;
+
+  if (stepNumber === 1) {
+    return {
+      name: "Email 1",
+      waitDays: 2,
+      branchCondition: "time",
+      onMatch: "next_step",
+      onNoMatch: "next_step",
+      subject: "Quick idea for {{company}}",
+      mode: "text",
+      body:
+        "Hi {{first_name}},\n\nI put together a quick idea for {{company}} that could be worth a look.\n\nOpen to a short chat next week?\n\nBest,\nJay",
+      bodyHtml: "",
+    };
+  }
+
+  if (stepNumber === 2) {
+    return {
+      name: "Follow-up",
+      waitDays: 0,
+      branchCondition: "time",
+      onMatch: "exit_sequence",
+      onNoMatch: "exit_sequence",
+      subject: "Following up on my note",
+      mode: "text",
+      body:
+        "Hi {{first_name}},\n\nFollowing up in case my last note got buried.\n\nHappy to send over a few ideas tailored to {{company}} if that helps.\n\nBest,\nJay",
+      bodyHtml: "",
+    };
+  }
 
   return {
-    name: stepNumber === 1 ? "Primary email" : `Step ${stepNumber}`,
-    waitDays: stepNumber === 1 ? 2 : 0,
-    branchCondition: stepNumber === 1 ? "opened" : "time",
-    onMatch: isFinal ? "exit_sequence" : "next_step",
-    onNoMatch: stepNumber === 1 ? "next_step" : "exit_sequence",
-    subject: stepNumber === 1 ? "Quick idea for {{company}}" : "Following up on my note",
+    name: `Step ${stepNumber}`,
+    waitDays: 2,
+    branchCondition: "time",
+    onMatch: "exit_sequence",
+    onNoMatch: "exit_sequence",
+    subject: `Step ${stepNumber} follow-up`,
     mode: "text",
     body:
-      stepNumber === 1
-        ? "Hi {{first_name}},\n\nThought this might be relevant for {{company}}.\n\nBest,\nJay"
-        : "Hi {{first_name}},\n\nBumping this once in case it got buried.\n\nBest,\nJay",
+      "Hi {{first_name}},\n\nWanted to send one last follow-up here.\n\nIf this is not a priority right now, no problem at all.\n\nBest,\nJay",
     bodyHtml: "",
   };
 }
 
 export function buildCampaignWizardInitialValues(input: {
-  gmailAccounts: Array<{ id: string; email_address: string }>;
+  mailboxAccounts: Array<{ id: string; email_address: string }>;
   contacts: ContactRecord[];
   templates: CampaignTemplateOption[];
   selectedTemplateId?: string | null;
@@ -52,7 +79,7 @@ export function buildCampaignWizardInitialValues(input: {
 
   return {
     campaignName: "",
-    gmailAccountId: input.gmailAccounts[0]?.id ?? "",
+    mailboxAccountId: input.mailboxAccounts[0]?.id ?? "",
     contactListId: "",
     targetContactIds: input.contacts.slice(0, 3).map((contact) => contact.id),
     timezone: "Asia/Calcutta",

@@ -22,10 +22,14 @@ function getDeepLinkFromArgv(argv = []) {
 }
 
 function buildProfileUrl(input = {}) {
-  const profileUrl = new URL("/profile", runtimeState.appOrigin);
+  const profileUrl = new URL("/settings/sending", runtimeState.appOrigin);
 
-  if (input.status === "connected" || input.status === "error" || input.status === "missing-code") {
-    profileUrl.searchParams.set("gmail", input.status);
+  if (input.status === "connected" || input.status === "error" || input.status === "missing-code" || input.status === "disconnected") {
+    profileUrl.searchParams.set("mailbox", input.status);
+  }
+
+  if (input.provider) {
+    profileUrl.searchParams.set("provider", input.provider);
   }
 
   if (input.message) {
@@ -47,6 +51,7 @@ function parseDesktopDeepLink(link) {
 
     return {
       message: url.searchParams.get("message"),
+      provider: url.searchParams.get("provider"),
       status: url.searchParams.get("status"),
     };
   } catch {
@@ -82,7 +87,11 @@ function isAllowedEmbeddedNavigation(targetUrl) {
       return true;
     }
 
-    return url.hostname === "accounts.google.com" || url.hostname.endsWith(".supabase.co");
+    return (
+      url.hostname === "accounts.google.com" ||
+      url.hostname === "login.microsoftonline.com" ||
+      url.hostname.endsWith(".supabase.co")
+    );
   } catch {
     return false;
   }
@@ -156,8 +165,11 @@ async function createMainWindow() {
   await mainWindow.loadURL(runtimeState.appOrigin);
 }
 
-async function resolveGmailConnectUrl() {
-  const connectUrl = new URL("/api/gmail/connect", runtimeState.appOrigin);
+async function resolveMailboxConnectUrl(provider) {
+  const connectUrl = new URL(
+    provider === "gmail" ? "/api/gmail/connect" : `/api/mailboxes/connect/${provider}`,
+    runtimeState.appOrigin,
+  );
   connectUrl.searchParams.set("desktopReturnUrl", buildDesktopReturnUrl(runtimeState.protocolScheme));
 
   const sessionCookies = await mainWindow.webContents.session.cookies.get({
@@ -171,11 +183,11 @@ async function resolveGmailConnectUrl() {
   const location = response.headers.get("location");
 
   if (!response.ok && !(response.status >= 300 && response.status < 400)) {
-    throw new Error(`Failed to start Gmail connection (${response.status}).`);
+    throw new Error(`Failed to start ${provider} connection (${response.status}).`);
   }
 
   if (!location) {
-    throw new Error("Gmail connection did not return a redirect URL.");
+    throw new Error(`${provider} connection did not return a redirect URL.`);
   }
 
   return new URL(location, connectUrl).toString();
@@ -190,7 +202,7 @@ ipcMain.handle("desktop:connect-gmail", async () => {
   }
 
   try {
-    const externalUrl = await resolveGmailConnectUrl();
+    const externalUrl = await resolveMailboxConnectUrl("gmail");
     await shell.openExternal(externalUrl);
     return { ok: true };
   } catch (error) {
@@ -200,6 +212,36 @@ ipcMain.handle("desktop:connect-gmail", async () => {
         error instanceof Error
           ? error.message
           : "Could not launch the Gmail OAuth flow.",
+    };
+  }
+});
+
+ipcMain.handle("desktop:connect-mailbox", async (_event, provider) => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return {
+      ok: false,
+      error: "Desktop window is not ready yet. Please try again.",
+    };
+  }
+
+  if (provider !== "gmail" && provider !== "outlook") {
+    return {
+      ok: false,
+      error: "Unsupported mailbox provider.",
+    };
+  }
+
+  try {
+    const externalUrl = await resolveMailboxConnectUrl(provider);
+    await shell.openExternal(externalUrl);
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : `Could not launch the ${provider} OAuth flow.`,
     };
   }
 });

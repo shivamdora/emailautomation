@@ -13,9 +13,12 @@ export async function POST(request: Request) {
     workspaceId: workspace.workspaceId,
     actorUserId: workspace.userId,
     action: "gmail.disconnected",
-    targetType: "gmail_account",
+    targetType: "mailbox_account",
     targetId: gmailAccountId,
+    metadata: { provider: "gmail" },
   });
 
-  return NextResponse.redirect(new URL("/profile?gmail=disconnected", request.url));
+  return NextResponse.redirect(new URL("/settings/sending?mailbox=disconnected&provider=gmail", request.url), {
+    status: 303,
+  });
 }

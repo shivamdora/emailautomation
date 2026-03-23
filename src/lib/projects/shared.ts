@@ -12,9 +12,20 @@ export type ProjectSummary = {
 };
 
 export type ProjectMailboxRegistryItem = ProjectSummary & {
+  mailboxAccounts: Array<{
+    id: string;
+    provider: "gmail" | "outlook";
+    email_address: string;
+    provider_account_label?: string | null;
+    status: string;
+    approval_status?: string | null;
+    approval_note?: string | null;
+  }>;
   gmailAccounts: Array<{
     id: string;
+    provider: "gmail" | "outlook";
     email_address: string;
+    provider_account_label?: string | null;
     status: string;
     approval_status?: string | null;
     approval_note?: string | null;

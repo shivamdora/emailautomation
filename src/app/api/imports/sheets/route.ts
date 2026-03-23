@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { googleSheetsImportSchema } from "@/lib/zod/schemas";
 import { importFromGoogleSheet } from "@/services/import-service";
@@ -38,6 +39,14 @@ export async function POST(request: Request) {
       targetType: "import",
       targetId: result.importId,
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId: workspace.activeProjectId,
+      },
+      { includeWorkspace: true },
+    );
 
     if (isClientImportRequest(request)) {
       return NextResponse.json({

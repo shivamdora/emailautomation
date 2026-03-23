@@ -1,4 +1,7 @@
 import { cache } from "react";
+import { buildVersionedCacheKey, getShellNamespaceVersion } from "@/lib/cache/namespaces";
+import { readThroughJsonCache } from "@/lib/cache/redis";
+import { workspaceContextSchema } from "@/lib/cache/schemas";
 import { getSessionUser } from "@/lib/auth/session";
 import { buildWorkspaceShellLabel, getWorkspaceOwnerFirstName } from "@/lib/db/workspace-label";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
@@ -6,7 +9,8 @@ import { type ProjectSummary } from "@/lib/projects/shared";
 import { env, requireSupabaseConfiguration } from "@/lib/supabase/env";
 import { isMissingColumnError as isMissingSchemaColumnError } from "@/lib/utils/supabase-schema";
 import {
-  ensureWorkspaceProjects,
+  bootstrapWorkspaceProjects,
+  getWorkspaceProjectsContext,
 } from "@/services/project-service";
 
 export type WorkspaceSummary = {
@@ -29,6 +33,12 @@ export type WorkspaceContext = {
   activeProjectId: string;
   activeProject: ProjectSummary;
   availableProjects: ProjectSummary[];
+};
+
+type WorkspaceUserInput = {
+  id: string;
+  email?: string | null;
+  user_metadata?: { full_name?: string | null } | null;
 };
 
 function buildWorkspaceName(email?: string | null, fullName?: string | null) {
@@ -466,6 +476,40 @@ async function ensureWorkspaceMemberships(user: {
   }
 }
 
+export async function bootstrapWorkspaceForUser(user: WorkspaceUserInput) {
+  requireSupabaseConfiguration();
+
+  await ensureWorkspaceMemberships(user);
+
+  const [availableWorkspaces, rawProfileResult] = await Promise.all([
+    listUserWorkspaces(user.id),
+    selectProfileWorkspaceState(user.id),
+  ]);
+
+  const profile = rawProfileResult.data as
+    | {
+        primary_workspace_id?: string | null;
+        active_workspace_id?: string | null;
+      }
+    | null;
+
+  const activeWorkspace =
+    availableWorkspaces.find(
+      (workspace) => workspace.id === (profile?.active_workspace_id ?? profile?.primary_workspace_id),
+    ) ??
+    availableWorkspaces[0];
+
+  if (!activeWorkspace) {
+    throw new Error("No workspace membership found.");
+  }
+
+  await bootstrapWorkspaceProjects({
+    workspaceId: activeWorkspace.id,
+    workspaceName: activeWorkspace.name,
+    userId: user.id,
+  });
+}
+
 export async function listUserWorkspaces(userId: string) {
   requireSupabaseConfiguration();
   const supabase = createAdminSupabaseClient();
@@ -615,19 +659,11 @@ export async function listWorkspaceMembers(workspaceId: string) {
   }));
 }
 
-export const getWorkspaceContext = cache(async (): Promise<WorkspaceContext> => {
+async function loadWorkspaceContextForUser(
+  user: WorkspaceUserInput,
+  options?: { allowBootstrap?: boolean },
+): Promise<WorkspaceContext> {
   requireSupabaseConfiguration();
-  const user = await getSessionUser();
-
-  if (!user) {
-    throw new Error("No authenticated user session.");
-  }
-
-  await ensureWorkspaceMemberships({
-    id: user.id,
-    email: user.email,
-    user_metadata: user.user_metadata as { full_name?: string | null } | null,
-  });
 
   const [availableWorkspaces, rawProfileResult] = await Promise.all([
     listUserWorkspaces(user.id),
@@ -649,6 +685,11 @@ export const getWorkspaceContext = cache(async (): Promise<WorkspaceContext> => 
     availableWorkspaces[0];
 
   if (!activeWorkspace) {
+    if (options?.allowBootstrap) {
+      await bootstrapWorkspaceForUser(user);
+      return loadWorkspaceContextForUser(user, { allowBootstrap: false });
+    }
+
     throw new Error("No workspace membership found.");
   }
 
@@ -658,11 +699,31 @@ export const getWorkspaceContext = cache(async (): Promise<WorkspaceContext> => 
     workspaceName: activeWorkspace.name,
     email: user.email,
   });
-  const { activeProject, availableProjects } = await ensureWorkspaceProjects({
-    workspaceId: activeWorkspace.id,
-    workspaceName: activeWorkspace.name,
-    userId: user.id,
-  });
+  let projectContext: Awaited<ReturnType<typeof getWorkspaceProjectsContext>>;
+
+  try {
+    projectContext = await getWorkspaceProjectsContext({
+      workspaceId: activeWorkspace.id,
+      userId: user.id,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to load workspace projects.";
+
+    if (options?.allowBootstrap && message === "No workspace projects found.") {
+      await bootstrapWorkspaceProjects({
+        workspaceId: activeWorkspace.id,
+        workspaceName: activeWorkspace.name,
+        userId: user.id,
+      });
+
+      projectContext = await getWorkspaceProjectsContext({
+        workspaceId: activeWorkspace.id,
+        userId: user.id,
+      });
+    } else {
+      throw error;
+    }
+  }
 
   return {
     userId: user.id,
@@ -677,8 +738,46 @@ export const getWorkspaceContext = cache(async (): Promise<WorkspaceContext> => 
     }),
     userFirstName,
     availableWorkspaces,
-    activeProjectId: activeProject.id,
-    activeProject,
-    availableProjects,
+    activeProjectId: projectContext.activeProject.id,
+    activeProject: projectContext.activeProject,
+    availableProjects: projectContext.availableProjects,
   };
+}
+
+const getWorkspaceContextForUser = cache(
+  async (userId: string, email: string | null, fullName: string | null) => {
+    const shellVersion = await getShellNamespaceVersion(userId);
+    const key = buildVersionedCacheKey(shellVersion, ["shell", "user", userId]);
+
+    return readThroughJsonCache({
+      key,
+      label: "workspace-shell",
+      ttlSeconds: 120,
+      schema: workspaceContextSchema,
+      load: () =>
+      loadWorkspaceContextForUser(
+        {
+          id: userId,
+          email,
+          user_metadata: fullName ? { full_name: fullName } : null,
+        },
+          { allowBootstrap: false },
+        ),
+    });
+  },
+);
+
+export const getWorkspaceContext = cache(async (): Promise<WorkspaceContext> => {
+  requireSupabaseConfiguration();
+  const user = await getSessionUser();
+
+  if (!user) {
+    throw new Error("No authenticated user session.");
+  }
+
+  return getWorkspaceContextForUser(
+    user.id,
+    user.email ?? null,
+    (user.user_metadata?.full_name as string | null | undefined) ?? null,
+  );
 });

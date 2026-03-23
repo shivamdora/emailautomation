@@ -103,7 +103,7 @@ export class GmailMailboxProvider implements MailboxProvider {
         });
 
         return {
-          gmailThreadId: detail.data.id ?? "",
+          providerThreadId: detail.data.id ?? "",
           messages: (detail.data.messages ?? []).map((message) => {
             const headers = Object.fromEntries(
               (message.payload?.headers ?? []).map((header) => [
@@ -121,7 +121,7 @@ export class GmailMailboxProvider implements MailboxProvider {
               decodeBody(message.payload?.body?.data);
 
             return {
-              gmailMessageId: message.id ?? "",
+              providerMessageId: message.id ?? "",
               direction: fromEmail?.includes(input.userEmail)
                 ? ("outbound" as const)
                 : ("inbound" as const),
@@ -140,7 +140,7 @@ export class GmailMailboxProvider implements MailboxProvider {
     );
 
     return {
-      historyId: listResponse.data.resultSizeEstimate?.toString() ?? input.historyId ?? null,
+      syncCursor: listResponse.data.resultSizeEstimate?.toString() ?? input.syncCursor ?? null,
       threads,
     };
   }
@@ -150,8 +150,8 @@ export class GmailMailboxProvider implements MailboxProvider {
       thread.messages
         .filter((message) => message.direction === "inbound")
         .map((message) => ({
-          gmailThreadId: thread.gmailThreadId,
-          gmailMessageId: message.gmailMessageId,
+          providerThreadId: thread.providerThreadId,
+          providerMessageId: message.providerMessageId,
           sentAt: message.sentAt,
           fromEmail: message.fromEmail,
         })),

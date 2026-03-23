@@ -7,46 +7,35 @@ import { productContent } from "@/content/product";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  getCachedDashboardMetrics,
+  getCachedReplyRateByCampaign,
+  getCachedWorkspaceProjectMetrics,
+} from "@/lib/cache/read-models";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { getDashboardMetrics, getReplyRateByCampaign } from "@/services/analytics-service";
 
 export default async function DashboardPage() {
   const workspace = await getWorkspaceContext();
-  const [metrics, chartData, projectBreakdown] = await Promise.all([
-    getDashboardMetrics(workspace.workspaceId) as Promise<{
-      totalLeads: number;
-      queued: number;
-      sent: number;
-      followupSent: number;
-      replied: number;
-      unsubscribed: number;
-      failed: number;
-      replyRate: number;
-    }>,
-    getReplyRateByCampaign(workspace.workspaceId) as Promise<
-      Array<{
-        name: string;
-        replyRate: number;
-      }>
-    >,
-    Promise.all(
-      workspace.availableProjects.map(async (project) => ({
-        project,
-        metrics: (await getDashboardMetrics(workspace.workspaceId, {
-          projectId: project.id,
-        })) as {
-          totalLeads: number;
-          queued: number;
-          sent: number;
-          followupSent: number;
-          replied: number;
-          unsubscribed: number;
-          failed: number;
-          replyRate: number;
-        },
-      })),
-    ),
+  const [metrics, chartData, projectMetrics] = await Promise.all([
+    getCachedDashboardMetrics(workspace.userId, workspace.workspaceId),
+    getCachedReplyRateByCampaign(workspace.userId, workspace.workspaceId),
+    getCachedWorkspaceProjectMetrics(workspace.userId, workspace.workspaceId),
   ]);
+  const projectMetricsById = new Map(projectMetrics.map((item) => [item.projectId, item]));
+  const projectBreakdown = workspace.availableProjects.map((project) => ({
+    project,
+    metrics:
+      projectMetricsById.get(project.id) ?? {
+        totalLeads: 0,
+        queued: 0,
+        sent: 0,
+        followupSent: 0,
+        replied: 0,
+        unsubscribed: 0,
+        failed: 0,
+        replyRate: 0,
+      },
+  }));
 
   return (
     <div className="grid gap-8">

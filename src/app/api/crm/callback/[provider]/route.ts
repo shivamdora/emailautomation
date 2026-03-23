@@ -3,7 +3,7 @@ import { verifyOAuthState } from "@/lib/auth/oauth-state";
 import { getCRMAdapter, type CrmProvider } from "@/services/crm-adapters";
 import { storeOAuthCrmConnection } from "@/services/crm-service";
 
-const SUPPORTED_PROVIDERS = new Set<CrmProvider>(["hubspot", "salesforce"]);
+const SUPPORTED_PROVIDERS = new Set<CrmProvider>(["hubspot", "salesforce", "pipedrive", "zoho"]);
 
 export async function GET(
   request: Request,
@@ -12,7 +12,7 @@ export async function GET(
   const { provider } = await context.params;
 
   if (!SUPPORTED_PROVIDERS.has(provider as CrmProvider)) {
-    return NextResponse.redirect(new URL("/settings?crm=unsupported-provider", request.url));
+    return NextResponse.redirect(new URL("/settings/integrations?crm=unsupported-provider", request.url));
   }
 
   try {
@@ -21,7 +21,7 @@ export async function GET(
     const state = url.searchParams.get("state");
 
     if (!code || !state) {
-      return NextResponse.redirect(new URL("/settings?crm=missing-code", request.url));
+      return NextResponse.redirect(new URL("/settings/integrations?crm=missing-code", request.url));
     }
 
     const payload = await verifyOAuthState<{
@@ -32,7 +32,7 @@ export async function GET(
     const adapter = getCRMAdapter(provider as CrmProvider);
 
     if (!adapter.exchangeCode) {
-      return NextResponse.redirect(new URL("/settings?crm=unsupported-provider", request.url));
+      return NextResponse.redirect(new URL("/settings/integrations?crm=unsupported-provider", request.url));
     }
 
     const redirectUri = new URL(`/api/crm/callback/${provider}`, request.url).toString();
@@ -44,12 +44,12 @@ export async function GET(
       exchange,
     });
 
-    return NextResponse.redirect(new URL(`/settings?crm=${provider}-connected`, request.url));
+    return NextResponse.redirect(new URL(`/settings/integrations?crm=${provider}-connected`, request.url));
   } catch (error) {
     console.error("CRM callback failed", error);
     const message = error instanceof Error ? error.message : "crm-connect-failed";
     return NextResponse.redirect(
-      new URL(`/settings?crm=error&message=${encodeURIComponent(message.slice(0, 160))}`, request.url),
+      new URL(`/settings/integrations?crm=error&message=${encodeURIComponent(message.slice(0, 160))}`, request.url),
     );
   }
 }

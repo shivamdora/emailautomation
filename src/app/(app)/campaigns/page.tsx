@@ -6,12 +6,16 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/layout/page-header";
 import { SimpleDataTable } from "@/components/data-table/simple-data-table";
 import { productContent } from "@/content/product";
+import { getCachedCampaigns } from "@/lib/cache/read-models";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { listCampaigns } from "@/services/campaign-service";
 
 export default async function CampaignsPage() {
   const workspace = await getWorkspaceContext();
-  const campaigns = (await listCampaigns(workspace.workspaceId, workspace.activeProjectId)) as Array<{
+  const campaigns = (await getCachedCampaigns(
+    workspace.userId,
+    workspace.workspaceId,
+    workspace.activeProjectId,
+  )) as Array<{
     id: string;
     name: string;
     status: string;

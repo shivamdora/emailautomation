@@ -4,6 +4,7 @@ type DesktopGmailConnectResult = {
 };
 
 type OutboundFlowDesktopBridge = {
+  connectMailbox: (provider: "gmail" | "outlook") => Promise<DesktopGmailConnectResult>;
   connectGmail: () => Promise<DesktopGmailConnectResult>;
   isDesktop: boolean;
   version: string;

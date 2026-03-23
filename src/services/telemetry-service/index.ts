@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { env, requireSupabaseConfiguration } from "@/lib/supabase/env";
 import { normalizeEmailHtmlDocument } from "@/lib/utils/html";
 import { enqueueCrmWritebackFromEvent } from "@/services/crm-service";
+import { emitWorkspaceIntegrationEvent } from "@/services/integration-event-service";
 
 type TrackingPayload = {
   workspaceId: string;
@@ -44,6 +45,7 @@ export async function recordMessageEvent(input: {
   campaignContactId?: string | null;
   outboundMessageId?: string | null;
   gmailMessageId?: string | null;
+  providerMessageId?: string | null;
   eventType: "sent" | "opened" | "clicked" | "replied" | "unsubscribed" | "bounced" | "meeting_booked";
   metadata?: Record<string, unknown> | null;
 }) {
@@ -55,6 +57,7 @@ export async function recordMessageEvent(input: {
     campaign_contact_id: input.campaignContactId ?? null,
     outbound_message_id: input.outboundMessageId ?? null,
     gmail_message_id: input.gmailMessageId ?? null,
+    provider_message_id: input.providerMessageId ?? input.gmailMessageId ?? null,
     event_type: input.eventType,
     metadata: input.metadata ?? {},
   });
@@ -72,6 +75,57 @@ export async function recordMessageEvent(input: {
     });
   } catch (writebackError) {
     console.error("Failed to enqueue CRM writeback", writebackError);
+  }
+
+  try {
+    const metadata = input.metadata ?? {};
+
+    if (input.eventType === "sent") {
+      await emitWorkspaceIntegrationEvent({
+        workspaceId: input.workspaceId,
+        eventType: "campaign.sent",
+        summary: `Campaign email sent${metadata.toEmail ? ` to ${String(metadata.toEmail)}` : ""}.`,
+        metadata,
+      });
+    }
+
+    if (input.eventType === "replied") {
+      await emitWorkspaceIntegrationEvent({
+        workspaceId: input.workspaceId,
+        eventType: "campaign.replied",
+        summary: `Reply received${metadata.fromEmail ? ` from ${String(metadata.fromEmail)}` : ""}.`,
+        metadata,
+      });
+
+      if (metadata.disposition === "negative") {
+        await emitWorkspaceIntegrationEvent({
+          workspaceId: input.workspaceId,
+          eventType: "campaign.negative_reply",
+          summary: `Negative reply received${metadata.fromEmail ? ` from ${String(metadata.fromEmail)}` : ""}.`,
+          metadata,
+        });
+      }
+    }
+
+    if (input.eventType === "unsubscribed") {
+      await emitWorkspaceIntegrationEvent({
+        workspaceId: input.workspaceId,
+        eventType: "campaign.unsubscribed",
+        summary: "A contact unsubscribed from campaign messaging.",
+        metadata,
+      });
+    }
+
+    if (input.eventType === "meeting_booked") {
+      await emitWorkspaceIntegrationEvent({
+        workspaceId: input.workspaceId,
+        eventType: "campaign.meeting_booked",
+        summary: "A meeting was booked from an outbound conversation.",
+        metadata,
+      });
+    }
+  } catch (integrationError) {
+    console.error("Failed to emit workspace integration event", integrationError);
   }
 }
 

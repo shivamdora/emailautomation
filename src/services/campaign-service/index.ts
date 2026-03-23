@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "crypto";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { env, requireSupabaseConfiguration } from "@/lib/supabase/env";
 import { escapeHtml, normalizeEmailHtmlDocument, stripHtmlToText } from "@/lib/utils/html";
-import { isAnyMissingColumnResult } from "@/lib/utils/supabase-schema";
+import { isAnyMissingColumnResult, isMissingTableResult } from "@/lib/utils/supabase-schema";
 import { renderTemplate } from "@/lib/utils/template";
 import {
   buildWorkflowDefinitionFromStoredSteps,
@@ -23,6 +23,13 @@ import { assertWorkspaceCanCreateCampaign, refreshWorkspaceUsageCounters } from 
 import { getMailboxAccessTokenForAccount, sendWithMailboxProvider } from "@/services/gmail-service";
 import { instrumentHtmlForTracking, recordMessageEvent } from "@/services/telemetry-service";
 import { getSeedTemplateDefinitions } from "@/services/template-seed-service";
+import {
+  cancelPendingCampaignJobs,
+  isQueueSchemaCompatibilityError,
+  reconcileCampaignJobs,
+  requeueFailedCampaignContact,
+} from "@/services/campaign-send-queue-service";
+import { assertHunterPreLaunchGuardrails } from "@/services/hunter-service";
 
 type CampaignStepInput = {
   subject: string;
@@ -193,6 +200,55 @@ function normalizeStepInput(step: CampaignStepInput) {
   };
 }
 
+async function resolveCampaignMailboxAssignment(input: {
+  mailboxAccountId: string;
+  projectId: string;
+  workspaceId: string;
+}) {
+  const supabase = createAdminSupabaseClient();
+  const mailboxResult = await supabase
+    .from("mailbox_accounts")
+    .select("id, provider")
+    .eq("workspace_id", input.workspaceId)
+    .eq("project_id", input.projectId)
+    .eq("id", input.mailboxAccountId)
+    .maybeSingle();
+
+  if (mailboxResult.error && !isMissingTableResult(mailboxResult, "mailbox_accounts")) {
+    throw mailboxResult.error;
+  }
+
+  if (mailboxResult.data) {
+    const provider = (mailboxResult.data as { provider?: string | null }).provider;
+
+    return {
+      gmailAccountId: provider === "gmail" ? input.mailboxAccountId : null,
+      mailboxAccountId: input.mailboxAccountId,
+    };
+  }
+
+  const gmailResult = await supabase
+    .from("gmail_accounts")
+    .select("id")
+    .eq("workspace_id", input.workspaceId)
+    .eq("project_id", input.projectId)
+    .eq("id", input.mailboxAccountId)
+    .maybeSingle();
+
+  if (gmailResult.error) {
+    throw gmailResult.error;
+  }
+
+  if (!gmailResult.data) {
+    throw new Error("Mailbox not found for this project.");
+  }
+
+  return {
+    gmailAccountId: input.mailboxAccountId,
+    mailboxAccountId: input.mailboxAccountId,
+  };
+}
+
 function appendUnsubscribeHtml(htmlBody: string, unsubscribeLink: string) {
   const normalized = normalizeEmailHtmlDocument(htmlBody);
   const unsubscribeBlock = `<div style="margin-top:24px;font-size:13px;color:#64748b;"><a href="${unsubscribeLink}">Unsubscribe</a></div>`;
@@ -333,7 +389,7 @@ async function selectCampaignWithSteps(campaignId: string) {
   let result = await supabase
     .from("campaigns")
     .select(
-      "id, workspace_id, project_id, name, status, daily_send_limit, timezone, send_window_start, send_window_end, gmail_account_id, workflow_definition_jsonb, campaign_steps(id, step_number, step_type, subject_template, body_template, body_html_template, wait_days), campaign_contacts(id, status, current_step, next_due_at, contact_id, contact:contacts(email, first_name, company))",
+      "id, workspace_id, project_id, name, status, daily_send_limit, timezone, send_window_start, send_window_end, mailbox_account_id, gmail_account_id, workflow_definition_jsonb, campaign_steps(id, step_number, step_type, subject_template, body_template, body_html_template, wait_days), campaign_contacts(id, status, current_step, next_due_at, contact_id, contact:contacts(email, first_name, company))",
     )
     .eq("id", campaignId)
     .single();
@@ -360,7 +416,7 @@ async function selectCampaignForEditing(campaignId: string, workspaceId: string,
   let result = await supabase
     .from("campaigns")
     .select(
-      "id, workspace_id, project_id, name, status, gmail_account_id, daily_send_limit, timezone, send_window_start, send_window_end, workflow_definition_jsonb, campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days), campaign_contacts(contact_id, status, current_step)",
+      "id, workspace_id, project_id, name, status, mailbox_account_id, gmail_account_id, daily_send_limit, timezone, send_window_start, send_window_end, workflow_definition_jsonb, campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days), campaign_contacts(contact_id, status, current_step)",
     )
     .eq("id", campaignId)
     .eq("workspace_id", workspaceId)
@@ -529,6 +585,7 @@ export async function getCampaignById(campaignId: string, workspaceId?: string, 
     status: string;
     daily_send_limit: number;
     timezone: string;
+    mailbox_account_id?: string | null;
     gmail_account_id: string;
     workflow_definition_jsonb?: Partial<CampaignWorkflowDefinition> | null;
     send_window_start?: string | null;
@@ -555,6 +612,7 @@ export async function getCampaignForEditing(campaignId: string, workspaceId: str
     project_id: string;
     name: string;
     status: string;
+    mailbox_account_id?: string | null;
     gmail_account_id: string;
     daily_send_limit: number;
     timezone: string;
@@ -581,6 +639,7 @@ type DueCampaignContact = {
   failed_attempts: number;
   next_due_at: string | null;
   last_thread_id?: string | null;
+  last_message_id?: string | null;
   contact?: CampaignContactContext | null;
   campaign?: {
     id: string;
@@ -588,7 +647,8 @@ type DueCampaignContact = {
     project_id: string;
     name: string;
     status: string;
-    gmail_account_id: string;
+    mailbox_account_id?: string | null;
+    gmail_account_id?: string | null;
     workflow_definition_jsonb?: Partial<CampaignWorkflowDefinition> | null;
     daily_send_limit: number;
     send_window_start: string;
@@ -599,6 +659,284 @@ type DueCampaignContact = {
   outbound_messages?: Array<{ step_number: number }> | null;
 };
 
+async function loadLegacyDueCampaignContacts(campaignId: string, options?: { limit?: number; dueBefore?: string }) {
+  const supabase = createAdminSupabaseClient();
+  const dueBefore = options?.dueBefore ?? new Date().toISOString();
+  const limit = options?.limit ?? 250;
+  let result = await supabase
+    .from("campaign_contacts")
+    .select(
+      `
+      id,
+      campaign_id,
+      contact_id,
+      current_step,
+      current_node_key,
+      branch_history_jsonb,
+      status,
+      failed_attempts,
+      next_due_at,
+      last_thread_id,
+      last_message_id,
+      contact:contacts(
+        email,
+        first_name,
+        last_name,
+        company,
+        website,
+        job_title,
+        custom_fields_jsonb,
+        unsubscribed_at
+      ),
+      campaign:campaigns(
+        id,
+        workspace_id,
+        project_id,
+        name,
+        status,
+        mailbox_account_id,
+        gmail_account_id,
+        workflow_definition_jsonb,
+        daily_send_limit,
+        send_window_start,
+        send_window_end,
+        timezone,
+        campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days)
+      ),
+      outbound_messages(step_number)
+    `,
+    )
+    .eq("campaign_id", campaignId)
+    .not("next_due_at", "is", null)
+    .lte("next_due_at", dueBefore)
+    .in("status", ["queued", "followup_due", "sent"])
+    .order("next_due_at", { ascending: true })
+    .limit(limit);
+
+  if (
+    isAnyMissingColumnResult(result, [
+      { table: "campaigns", column: "mailbox_account_id" },
+      { table: "campaign_steps", column: "body_html_template" },
+    ])
+  ) {
+    result = await supabase
+      .from("campaign_contacts")
+      .select(
+        `
+        id,
+        campaign_id,
+        contact_id,
+        current_step,
+        current_node_key,
+        branch_history_jsonb,
+        status,
+        failed_attempts,
+        next_due_at,
+        last_thread_id,
+        last_message_id,
+        contact:contacts(
+          email,
+          first_name,
+          last_name,
+          company,
+          website,
+          job_title,
+          custom_fields_jsonb,
+          unsubscribed_at
+        ),
+        campaign:campaigns(
+          id,
+          workspace_id,
+          project_id,
+          name,
+          status,
+          gmail_account_id,
+          workflow_definition_jsonb,
+          daily_send_limit,
+          send_window_start,
+          send_window_end,
+          timezone,
+          campaign_steps(step_number, step_type, subject_template, body_template, wait_days)
+        ),
+        outbound_messages(step_number)
+      `,
+      )
+      .eq("campaign_id", campaignId)
+      .not("next_due_at", "is", null)
+      .lte("next_due_at", dueBefore)
+      .in("status", ["queued", "followup_due", "sent"])
+      .order("next_due_at", { ascending: true })
+      .limit(limit);
+  }
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  return (result.data as DueCampaignContact[] | null) ?? [];
+}
+
+async function processLegacyCampaignSends(
+  campaignId: string,
+  options?: { ignoreSendWindow?: boolean; limit?: number },
+) {
+  const contacts = await loadLegacyDueCampaignContacts(campaignId, { limit: options?.limit });
+  let processed = 0;
+
+  for (const contact of contacts) {
+    const result = await processCampaignContact(contact, {
+      ignoreSendWindow: options?.ignoreSendWindow,
+    });
+
+    if (result.processed) {
+      processed += 1;
+    }
+  }
+
+  return { processed, eligible: contacts.length };
+}
+
+async function reconcileCampaignJobsWithFallback(campaignId: string) {
+  try {
+    await reconcileCampaignJobs(campaignId);
+    return { usingLegacyMode: false };
+  } catch (error) {
+    if (!isQueueSchemaCompatibilityError(error)) {
+      throw error;
+    }
+
+    return { usingLegacyMode: true };
+  }
+}
+
+async function retryFailedCampaignContactsForLegacySend(campaignId: string) {
+  const supabase = createAdminSupabaseClient();
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("campaign_contacts")
+    .select("id, current_step")
+    .eq("campaign_id", campaignId)
+    .eq("status", "failed")
+    .limit(250);
+
+  if (error) {
+    throw error;
+  }
+
+  const failedContacts = ((data ?? []) as Array<{ id: string; current_step: number }>).filter(Boolean);
+
+  for (const contact of failedContacts) {
+    await supabase
+      .from("campaign_contacts")
+      .update({
+        status: contact.current_step > 1 ? "followup_due" : "queued",
+        next_due_at: nowIso,
+        error_message: null,
+      })
+      .eq("id", contact.id);
+  }
+
+  return failedContacts.length;
+}
+
+function getSendNowFailureMessage(input: {
+  provider?: string | null;
+  mailboxEmail?: string | null;
+  errorMessage?: string | null;
+}) {
+  const provider = input.provider === "outlook" ? "Outlook" : "Gmail";
+  const mailboxLabel = input.mailboxEmail?.trim() ? ` for ${input.mailboxEmail.trim()}` : "";
+  const normalized = (input.errorMessage ?? "").trim().toLowerCase();
+
+  if (normalized.includes("unauthorized_client")) {
+    return `${provider} mailbox authorization failed${mailboxLabel}. Reconnect the mailbox in Settings > Sending, then retry Send now.`;
+  }
+
+  if (normalized.includes("invalid_grant")) {
+    return `${provider} mailbox session expired${mailboxLabel}. Reconnect the mailbox in Settings > Sending, then retry Send now.`;
+  }
+
+  if (normalized.includes("missing refresh token")) {
+    return `${provider} mailbox refresh token is missing${mailboxLabel}. Reconnect the mailbox in Settings > Sending, then retry Send now.`;
+  }
+
+  if (normalized.includes("pending workspace approval")) {
+    return `${provider} mailbox${mailboxLabel} is still pending workspace approval. Approve it in Settings > Sending, then retry Send now.`;
+  }
+
+  return input.errorMessage?.trim() || "Campaign contacts are currently blocked from sending. Check the mailbox connection and retry.";
+}
+
+async function assertCampaignSendNowNotBlocked(campaignId: string) {
+  const supabase = createAdminSupabaseClient();
+  const nowIso = new Date().toISOString();
+  const [{ count: dueQueueJobsCount }, { count: dueLegacyContactsCount }, { data: latestFailure }] = await Promise.all([
+    supabase
+      .from("campaign_send_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .in("status", ["pending", "reserved"])
+      .lte("scheduled_for", nowIso),
+    supabase
+      .from("campaign_contacts")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .in("status", ["queued", "followup_due", "sent"])
+      .not("next_due_at", "is", null)
+      .lte("next_due_at", nowIso),
+    supabase
+      .from("campaign_contacts")
+      .select(
+        "error_message, campaign:campaigns(mailbox:mailbox_accounts(provider, email_address), gmail:gmail_accounts(email_address))",
+      )
+      .eq("campaign_id", campaignId)
+      .eq("status", "failed")
+      .not("error_message", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if ((dueQueueJobsCount ?? 0) > 0 || (dueLegacyContactsCount ?? 0) > 0) {
+    return;
+  }
+
+  const failure = latestFailure as
+    | {
+        error_message?: string | null;
+        campaign?: {
+          mailbox?: { provider?: string | null; email_address?: string | null } | null;
+          gmail?: { email_address?: string | null } | null;
+        } | null;
+      }
+    | null;
+
+  if (!failure?.error_message) {
+    return;
+  }
+
+  throw new Error(
+    getSendNowFailureMessage({
+      provider: failure.campaign?.mailbox?.provider ?? "gmail",
+      mailboxEmail: failure.campaign?.mailbox?.email_address ?? failure.campaign?.gmail?.email_address ?? null,
+      errorMessage: failure.error_message,
+    }),
+  );
+}
+
+function shouldFallbackToLegacySendWorker(
+  response: Response,
+  payload: { error?: string; message?: string; code?: string } | null,
+) {
+  if (response.status === 404) {
+    return true;
+  }
+
+  const message = `${payload?.error ?? ""} ${payload?.message ?? ""}`.toLowerCase();
+  return payload?.code === "NOT_FOUND" || message.includes("requested function was not found");
+}
+
+// Legacy helper kept temporarily while the queue rollout settles; campaign delivery now runs through campaign_send_jobs.
 async function processCampaignContact(item: DueCampaignContact, options?: { ignoreSendWindow?: boolean }) {
   const supabase = createAdminSupabaseClient();
   const campaign = item.campaign;
@@ -696,7 +1034,8 @@ async function processCampaignContact(item: DueCampaignContact, options?: { igno
   }
 
   try {
-    const mailbox = await getMailboxAccessTokenForAccount(campaign.gmail_account_id);
+    const mailboxAccountId = campaign.mailbox_account_id ?? campaign.gmail_account_id ?? "";
+    const mailbox = await getMailboxAccessTokenForAccount(mailboxAccountId);
     const unsubscribeToken = randomUUID();
     const rendered = renderCampaignStepContent(step, contact, buildUnsubscribeLink(unsubscribeToken));
     const trackedHtml = await instrumentHtmlForTracking({
@@ -706,6 +1045,7 @@ async function processCampaignContact(item: DueCampaignContact, options?: { igno
       html: rendered.bodyHtml,
     });
     const sendResult = await sendWithMailboxProvider({
+      provider: mailbox.provider,
       accessToken: mailbox.accessToken,
       fromEmail: mailbox.emailAddress,
       toEmail: contact.email,
@@ -713,6 +1053,7 @@ async function processCampaignContact(item: DueCampaignContact, options?: { igno
       bodyHtml: trackedHtml,
       bodyText: rendered.bodyText,
       replyThreadId: item.current_step > 1 ? item.last_thread_id : null,
+      replyMessageId: item.current_step > 1 ? item.last_message_id ?? null : null,
     });
 
     const sentAt = new Date().toISOString();
@@ -722,6 +1063,8 @@ async function processCampaignContact(item: DueCampaignContact, options?: { igno
       campaign_contact_id: item.id,
       gmail_message_id: sendResult.messageId ?? null,
       gmail_thread_id: sendResult.threadId ?? null,
+      provider_message_id: sendResult.messageId ?? null,
+      provider_thread_id: sendResult.threadId ?? null,
       step_number: item.current_step,
       sent_at: sentAt,
       status: "sent",
@@ -735,6 +1078,8 @@ async function processCampaignContact(item: DueCampaignContact, options?: { igno
       workspace_id: campaign.workspace_id,
       project_id: campaign.project_id,
       campaign_contact_id: item.id,
+      mailbox_account_id: mailbox.mailboxAccountId,
+      provider_thread_id: sendResult.threadId || sendResult.messageId || randomUUID(),
       gmail_thread_id: sendResult.threadId || sendResult.messageId || randomUUID(),
       subject: rendered.subject,
       snippet: rendered.snippet,
@@ -763,6 +1108,7 @@ async function processCampaignContact(item: DueCampaignContact, options?: { igno
       campaignContactId: item.id,
       outboundMessageId: (outboundMessage as { id?: string } | null)?.id ?? null,
       gmailMessageId: sendResult.messageId ?? null,
+      providerMessageId: sendResult.messageId ?? null,
       eventType: "sent",
       metadata: {
         stepNumber: item.current_step,
@@ -791,7 +1137,7 @@ export async function createCampaign(input: {
   projectId: string;
   userId: string;
   campaignName: string;
-  gmailAccountId: string;
+  mailboxAccountId: string;
   targetContactIds: string[];
   timezone: string;
   sendWindowStart: string;
@@ -801,7 +1147,16 @@ export async function createCampaign(input: {
 }) {
   requireSupabaseConfiguration();
   await assertWorkspaceCanCreateCampaign(input.workspaceId);
+  await assertHunterPreLaunchGuardrails({
+    workspaceId: input.workspaceId,
+    targetContactIds: input.targetContactIds,
+  });
   const workflowDefinition = normalizeWorkflowDefinition(input.workflowDefinition);
+  const mailboxAssignment = await resolveCampaignMailboxAssignment({
+    mailboxAccountId: input.mailboxAccountId,
+    projectId: input.projectId,
+    workspaceId: input.workspaceId,
+  });
 
   const supabase = createAdminSupabaseClient();
   let createResult = await supabase
@@ -812,7 +1167,8 @@ export async function createCampaign(input: {
       owner_user_id: input.userId,
       name: input.campaignName,
       status: "active",
-      gmail_account_id: input.gmailAccountId,
+      mailbox_account_id: mailboxAssignment.mailboxAccountId,
+      gmail_account_id: mailboxAssignment.gmailAccountId,
       daily_send_limit: input.dailySendLimit,
       send_window_start: input.sendWindowStart,
       send_window_end: input.sendWindowEnd,
@@ -824,6 +1180,12 @@ export async function createCampaign(input: {
     .single();
 
   if (isCampaignSchemaResult(createResult)) {
+    if (mailboxAssignment.gmailAccountId !== mailboxAssignment.mailboxAccountId) {
+      throw new Error(
+        "Outlook senders require the latest mailbox-account migration. Apply the current Supabase migrations and retry.",
+      );
+    }
+
     createResult = await supabase
       .from("campaigns")
       .insert({
@@ -832,7 +1194,7 @@ export async function createCampaign(input: {
         owner_user_id: input.userId,
         name: input.campaignName,
         status: "active",
-        gmail_account_id: input.gmailAccountId,
+        gmail_account_id: mailboxAssignment.gmailAccountId,
         daily_send_limit: input.dailySendLimit,
         send_window_start: input.sendWindowStart,
         send_window_end: input.sendWindowEnd,
@@ -868,6 +1230,7 @@ export async function createCampaign(input: {
     })),
   );
 
+  await reconcileCampaignJobsWithFallback(campaign.id);
   await refreshWorkspaceUsageCounters(input.workspaceId);
 
   return { id: campaign.id, launched: true };
@@ -878,7 +1241,7 @@ export async function updateCampaign(input: {
   projectId: string;
   campaignId: string;
   campaignName: string;
-  gmailAccountId: string;
+  mailboxAccountId: string;
   targetContactIds: string[];
   timezone: string;
   sendWindowStart: string;
@@ -887,7 +1250,16 @@ export async function updateCampaign(input: {
   workflowDefinition: { version?: number; steps?: WorkflowStepInput[] };
 }) {
   requireSupabaseConfiguration();
+  await assertHunterPreLaunchGuardrails({
+    workspaceId: input.workspaceId,
+    targetContactIds: input.targetContactIds,
+  });
   const workflowDefinition = normalizeWorkflowDefinition(input.workflowDefinition);
+  const mailboxAssignment = await resolveCampaignMailboxAssignment({
+    mailboxAccountId: input.mailboxAccountId,
+    projectId: input.projectId,
+    workspaceId: input.workspaceId,
+  });
 
   const supabase = createAdminSupabaseClient();
   const { data: campaign, error: campaignError } = await supabase
@@ -910,7 +1282,8 @@ export async function updateCampaign(input: {
     .from("campaigns")
     .update({
       name: input.campaignName,
-      gmail_account_id: input.gmailAccountId,
+      mailbox_account_id: mailboxAssignment.mailboxAccountId,
+      gmail_account_id: mailboxAssignment.gmailAccountId,
       daily_send_limit: input.dailySendLimit,
       send_window_start: input.sendWindowStart,
       send_window_end: input.sendWindowEnd,
@@ -926,11 +1299,17 @@ export async function updateCampaign(input: {
   }
 
   if (updateError && isCampaignSchemaCacheError(updateError)) {
+    if (mailboxAssignment.gmailAccountId !== mailboxAssignment.mailboxAccountId) {
+      throw new Error(
+        "Outlook senders require the latest mailbox-account migration. Apply the current Supabase migrations and retry.",
+      );
+    }
+
     const { error: fallbackUpdateError } = await supabase
       .from("campaigns")
       .update({
         name: input.campaignName,
-        gmail_account_id: input.gmailAccountId,
+        gmail_account_id: mailboxAssignment.gmailAccountId,
         daily_send_limit: input.dailySendLimit,
         send_window_start: input.sendWindowStart,
         send_window_end: input.sendWindowEnd,
@@ -991,6 +1370,15 @@ export async function updateCampaign(input: {
     }
 
     if (!["replied", "followup_sent", "unsubscribed"].includes(contact.status)) {
+      try {
+        await cancelPendingCampaignJobs(contact.id, {
+          reason: "Removed during campaign edit",
+        });
+      } catch (error) {
+        if (!isQueueSchemaCompatibilityError(error)) {
+          throw error;
+        }
+      }
       await supabase
         .from("campaign_contacts")
         .update({
@@ -1018,6 +1406,7 @@ export async function updateCampaign(input: {
     );
   }
 
+  await reconcileCampaignJobsWithFallback(input.campaignId);
   return { id: input.campaignId, updated: true };
 }
 
@@ -1070,23 +1459,15 @@ export async function pauseCampaign(
     await refreshWorkspaceUsageCounters(campaign.workspace_id);
   }
 
+  if (status === "active") {
+    await reconcileCampaignJobsWithFallback(campaignId);
+  }
+
   return { campaignId, status };
 }
 
 export async function markFailedContactForResend(campaignContactId: string) {
-  requireSupabaseConfiguration();
-
-  const supabase = createAdminSupabaseClient();
-  await supabase
-    .from("campaign_contacts")
-    .update({
-      status: "queued",
-      next_due_at: new Date().toISOString(),
-      error_message: null,
-    })
-    .eq("id", campaignContactId);
-
-  return { campaignContactId, status: "queued" };
+  return requeueFailedCampaignContact(campaignContactId);
 }
 
 export async function sendCampaignNow(campaignId: string, workspaceId: string, projectId: string) {
@@ -1108,96 +1489,95 @@ export async function sendCampaignNow(campaignId: string, workspaceId: string, p
   if (!campaign) {
     throw new Error("Campaign not found.");
   }
+  const queueMode = await reconcileCampaignJobsWithFallback(campaignId);
 
-  let dueContactsResult = await supabase
-    .from("campaign_contacts")
-    .select(
-      `
-      id,
-      campaign_id,
-      contact_id,
-      current_step,
-      current_node_key,
-      branch_history_jsonb,
-      status,
-      failed_attempts,
-      next_due_at,
-      last_thread_id,
-      contact:contacts(email, first_name, last_name, company, website, job_title, custom_fields_jsonb, unsubscribed_at),
-      campaign:campaigns(
-        id,
-        workspace_id,
-        project_id,
-        name,
-        status,
-        gmail_account_id,
-        workflow_definition_jsonb,
-        daily_send_limit,
-        send_window_start,
-        send_window_end,
-        timezone,
-        campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days)
-      ),
-      outbound_messages(step_number)
-    `,
-    )
-    .eq("campaign_id", campaignId)
-    .in("status", ["queued", "followup_due", "sent"])
-    .lte("next_due_at", new Date().toISOString())
-    .order("next_due_at", { ascending: true });
+  if (queueMode.usingLegacyMode) {
+    let legacyResult = await processLegacyCampaignSends(campaignId, {
+      ignoreSendWindow: true,
+      limit: 250,
+    });
 
-  if (isCampaignSchemaResult(dueContactsResult)) {
-    dueContactsResult = await supabase
-      .from("campaign_contacts")
-      .select(
-        `
-        id,
-        campaign_id,
-        contact_id,
-        current_step,
-        status,
-        failed_attempts,
-        next_due_at,
-        last_thread_id,
-        contact:contacts(email, first_name, last_name, company, website, job_title, custom_fields_jsonb, unsubscribed_at),
-        campaign:campaigns(
-          id,
-          workspace_id,
-          project_id,
-          name,
-          status,
-          gmail_account_id,
-          daily_send_limit,
-          send_window_start,
-          send_window_end,
-          timezone,
-          campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days)
-        ),
-        outbound_messages(step_number)
-      `,
-      )
-      .eq("campaign_id", campaignId)
-      .in("status", ["queued", "followup_due", "sent"])
-      .lte("next_due_at", new Date().toISOString())
-      .order("next_due_at", { ascending: true });
-  }
+    if (legacyResult.processed === 0) {
+      const retriedCount = await retryFailedCampaignContactsForLegacySend(campaignId);
 
-  const { data, error } = dueContactsResult;
-
-  if (error) {
-    throw error;
-  }
-
-  let processed = 0;
-
-  for (const item of (data ?? []) as DueCampaignContact[]) {
-    const result = await processCampaignContact(item, { ignoreSendWindow: true });
-    if (result.processed) {
-      processed += 1;
+      if (retriedCount > 0) {
+        legacyResult = await processLegacyCampaignSends(campaignId, {
+          ignoreSendWindow: true,
+          limit: 250,
+        });
+      }
     }
+
+    if (legacyResult.processed === 0) {
+      await assertCampaignSendNowNotBlocked(campaignId);
+    }
+
+    return {
+      campaignId,
+      processed: legacyResult.processed,
+    };
   }
 
-  return { campaignId, processed };
+  const functionUrl = `${env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-due-messages`;
+  const response = await fetch(functionUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY ?? ""}`,
+      ...(env.SUPABASE_CRON_VERIFY_SECRET
+        ? { "x-cron-secret": env.SUPABASE_CRON_VERIFY_SECRET }
+        : {}),
+    },
+    body: JSON.stringify({
+      campaignId,
+      maxJobs: 250,
+      ignoreSendWindow: true,
+    }),
+  });
+  const payload = (await response.json().catch(() => null)) as
+    | { processed?: number; error?: string; message?: string; code?: string }
+    | null;
+
+  if (!response.ok) {
+    if (shouldFallbackToLegacySendWorker(response, payload)) {
+      let legacyResult = await processLegacyCampaignSends(campaignId, {
+        ignoreSendWindow: true,
+        limit: 250,
+      });
+
+      if (legacyResult.processed === 0) {
+        const retriedCount = await retryFailedCampaignContactsForLegacySend(campaignId);
+
+        if (retriedCount > 0) {
+          legacyResult = await processLegacyCampaignSends(campaignId, {
+            ignoreSendWindow: true,
+            limit: 250,
+          });
+        }
+      }
+
+      if (legacyResult.processed === 0) {
+        await assertCampaignSendNowNotBlocked(campaignId);
+      }
+
+      return {
+        campaignId,
+        processed: legacyResult.processed,
+      };
+    }
+
+    throw new Error(payload?.error ?? payload?.message ?? "Failed to trigger the campaign send worker.");
+  }
+
+  if (Number(payload?.processed ?? 0) === 0) {
+    await assertCampaignSendNowNotBlocked(campaignId);
+  }
+
+  return {
+    campaignId,
+    processed: Number(payload?.processed ?? 0),
+  };
 }
 
 export function scheduleFollowup(sentAt: string) {

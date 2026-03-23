@@ -2,10 +2,10 @@ import { CampaignWizard } from "@/components/campaigns/campaign-wizard";
 import { PageHeader } from "@/components/layout/page-header";
 import { productContent } from "@/content/product";
 import { buildCampaignWizardInitialValues } from "@/lib/campaigns/wizard-defaults";
+import { getCachedContacts, getCachedTemplates } from "@/lib/cache/read-models";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { listTemplates } from "@/services/campaign-service";
-import { getWorkspaceGmailAccounts } from "@/services/gmail-service";
-import { listContacts } from "@/services/import-service";
+import type { TemplateListItem } from "@/lib/templates/gallery";
+import { getWorkspaceMailboxAccounts } from "@/services/mailbox-service";
 
 type NewCampaignPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -14,23 +14,21 @@ type NewCampaignPageProps = {
 export default async function NewCampaignPage({ searchParams }: NewCampaignPageProps) {
   const workspace = await getWorkspaceContext();
   const params = (await searchParams) ?? {};
-  const [rawGmailAccounts, rawContacts, rawTemplates] = await Promise.all([
-    getWorkspaceGmailAccounts(workspace.workspaceId, {
+  const [rawMailboxAccounts, rawContacts, rawTemplates] = await Promise.all([
+    getWorkspaceMailboxAccounts(workspace.workspaceId, {
       onlyApproved: true,
       projectId: workspace.activeProjectId,
     }),
-    listContacts(workspace.workspaceId, workspace.activeProjectId),
-    listTemplates(workspace.workspaceId, workspace.activeProjectId),
+    getCachedContacts(workspace.userId, workspace.workspaceId, workspace.activeProjectId),
+    getCachedTemplates(workspace.userId, workspace.workspaceId, workspace.activeProjectId),
   ]);
-  const gmailAccounts = rawGmailAccounts as Array<{ id: string; email_address: string }>;
-  const contacts = rawContacts;
-  const templates = rawTemplates as Array<{
+  const mailboxAccounts = rawMailboxAccounts as Array<{
     id: string;
-    name: string;
-    subject_template: string;
-    body_template: string;
-    body_html_template?: string | null;
+    email_address: string;
+    provider: "gmail" | "outlook";
   }>;
+  const contacts = rawContacts;
+  const templates = rawTemplates as TemplateListItem[];
   const selectedTemplateId = typeof params.templateId === "string" ? params.templateId : null;
 
   return (
@@ -41,12 +39,12 @@ export default async function NewCampaignPage({ searchParams }: NewCampaignPageP
         description={productContent.campaigns.newCampaign.description}
       />
       <CampaignWizard
-        gmailAccounts={gmailAccounts}
+        mailboxAccounts={mailboxAccounts}
         contacts={contacts}
         templates={templates}
         initialSelectedTemplateId={selectedTemplateId ?? undefined}
         initialValues={buildCampaignWizardInitialValues({
-          gmailAccounts,
+          mailboxAccounts,
           contacts,
           templates,
           selectedTemplateId,

@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { env, requireSupabaseConfiguration } from "@/lib/supabase/env";
+import { isMissingTableResult } from "@/lib/utils/supabase-schema";
 import {
   buildProjectSlug,
   type ProjectMailboxRegistryItem,
@@ -8,7 +9,6 @@ import {
 } from "@/lib/projects/shared";
 import {
   ensureDefaultTemplatesForProject,
-  ensureDefaultTemplatesForProjects,
 } from "@/services/template-seed-service";
 
 function toProjectServiceError(step: string, error: unknown) {
@@ -130,25 +130,10 @@ export async function listWorkspaceProjects(workspaceId: string) {
   return selectWorkspaceProjects(workspaceId);
 }
 
-export async function ensureWorkspaceProjects(input: {
+async function loadActiveProjectForUser(input: {
   workspaceId: string;
-  workspaceName: string;
   userId: string;
 }) {
-  requireSupabaseConfiguration();
-  let projects = await selectWorkspaceProjects(input.workspaceId);
-
-  if (!projects.length) {
-    const defaultProject = await ensureDefaultProject(input);
-    projects = [defaultProject];
-  } else {
-    await ensureDefaultTemplatesForProjects({
-      workspaceId: input.workspaceId,
-      projects,
-      userId: input.userId,
-    });
-  }
-
   const supabase = createAdminSupabaseClient();
   const { data: rawMembership, error } = await supabase
     .from("workspace_members")
@@ -161,7 +146,47 @@ export async function ensureWorkspaceProjects(input: {
     throw toProjectServiceError("loading the active project", error);
   }
 
-  const membership = rawMembership as { last_active_project_id?: string | null } | null;
+  return rawMembership as { last_active_project_id?: string | null } | null;
+}
+
+export async function getWorkspaceProjectsContext(input: {
+  workspaceId: string;
+  userId: string;
+}) {
+  requireSupabaseConfiguration();
+  const projects = await selectWorkspaceProjects(input.workspaceId);
+
+  if (!projects.length) {
+    throw new Error("No workspace projects found.");
+  }
+
+  const membership = await loadActiveProjectForUser(input);
+  const activeProject =
+    projects.find((project) => project.id === membership?.last_active_project_id) ?? projects[0];
+
+  return {
+    availableProjects: projects,
+    activeProject,
+  };
+}
+
+export async function bootstrapWorkspaceProjects(input: {
+  workspaceId: string;
+  workspaceName: string;
+  userId: string;
+}) {
+  requireSupabaseConfiguration();
+  let projects = await selectWorkspaceProjects(input.workspaceId);
+
+  if (!projects.length) {
+    const defaultProject = await ensureDefaultProject(input);
+    projects = [defaultProject];
+  }
+
+  const membership = await loadActiveProjectForUser({
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+  });
   const activeProject =
     projects.find((project) => project.id === membership?.last_active_project_id) ?? projects[0];
 
@@ -346,30 +371,69 @@ export async function updateProject(input: {
 export async function listWorkspaceProjectMailboxRegistry(workspaceId: string) {
   requireSupabaseConfiguration();
   const supabase = createAdminSupabaseClient();
-  const [projects, rawAccounts] = await Promise.all([
+  const [projects, rawMailboxAccounts] = await Promise.all([
     listWorkspaceProjects(workspaceId),
     supabase
-      .from("gmail_accounts")
-      .select("id, project_id, email_address, status, approval_status, approval_note")
+      .from("mailbox_accounts")
+      .select("id, project_id, provider, email_address, provider_account_label, status, approval_status, approval_note")
       .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false }),
   ]);
 
-  if (rawAccounts.error) {
-    throw toProjectServiceError("loading the project mailbox registry", rawAccounts.error);
-  }
-
-  const accounts = (rawAccounts.data ?? []) as Array<{
+  let accounts = [] as Array<{
     id: string;
     project_id: string;
+    provider: "gmail" | "outlook";
     email_address: string;
+    provider_account_label?: string | null;
     status: string;
     approval_status?: string | null;
     approval_note?: string | null;
   }>;
 
+  if (rawMailboxAccounts.error) {
+    if (!isMissingTableResult(rawMailboxAccounts, "mailbox_accounts")) {
+      throw toProjectServiceError("loading the project mailbox registry", rawMailboxAccounts.error);
+    }
+
+    const rawGmailAccounts = await supabase
+      .from("gmail_accounts")
+      .select("id, project_id, email_address, status, approval_status, approval_note")
+      .eq("workspace_id", workspaceId)
+      .order("created_at", { ascending: false });
+
+    if (rawGmailAccounts.error) {
+      throw toProjectServiceError("loading the project mailbox registry", rawGmailAccounts.error);
+    }
+
+    accounts = ((rawGmailAccounts.data ?? []) as Array<{
+      id: string;
+      project_id: string;
+      email_address: string;
+      status: string;
+      approval_status?: string | null;
+      approval_note?: string | null;
+    }>).map((account) => ({
+      ...account,
+      provider: "gmail" as const,
+      provider_account_label: account.email_address,
+    }));
+  } else {
+    accounts = (rawMailboxAccounts.data ?? []) as Array<{
+      id: string;
+      project_id: string;
+      provider: "gmail" | "outlook";
+      email_address: string;
+      provider_account_label?: string | null;
+      status: string;
+      approval_status?: string | null;
+      approval_note?: string | null;
+    }>;
+  }
+
   return projects.map((project) => ({
     ...project,
+    mailboxAccounts: accounts.filter((account) => account.project_id === project.id),
     gmailAccounts: accounts.filter((account) => account.project_id === project.id),
   })) satisfies ProjectMailboxRegistryItem[];
 }

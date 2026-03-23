@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { manualContactSchema } from "@/lib/zod/schemas";
 import { createManualContact } from "@/services/import-service";
@@ -32,6 +33,14 @@ export async function POST(request: Request) {
       targetType: "contact",
       targetId: contact.id,
     });
+    await invalidateProjectReadModels(
+      {
+        userId: workspace.userId,
+        workspaceId: workspace.workspaceId,
+        projectId: workspace.activeProjectId,
+      },
+      { includeWorkspace: true },
+    );
 
     return NextResponse.json({ contact });
   } catch (error) {

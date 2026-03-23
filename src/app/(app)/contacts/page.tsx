@@ -2,14 +2,14 @@ import { PageHeader } from "@/components/layout/page-header";
 import { productContent } from "@/content/product";
 import { ContactsManager } from "@/components/contacts/contacts-manager";
 import { ManualContactForm } from "@/components/forms/manual-contact-form";
+import { getCachedContacts, getCachedWorkspaceContactTags } from "@/lib/cache/read-models";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { listContacts, listWorkspaceContactTags } from "@/services/import-service";
 
 export default async function ContactsPage() {
   const workspace = await getWorkspaceContext();
   const [contacts, tags] = await Promise.all([
-    listContacts(workspace.workspaceId, workspace.activeProjectId),
-    listWorkspaceContactTags(workspace.workspaceId, workspace.activeProjectId),
+    getCachedContacts(workspace.userId, workspace.workspaceId, workspace.activeProjectId),
+    getCachedWorkspaceContactTags(workspace.userId, workspace.workspaceId, workspace.activeProjectId),
   ]);
 
   return (

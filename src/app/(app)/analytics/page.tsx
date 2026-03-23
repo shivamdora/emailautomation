@@ -4,9 +4,14 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LiquidSelect } from "@/components/ui/liquid-select";
+import {
+  getCachedDashboardMetrics,
+  getCachedReplyRateByCampaign,
+  getCachedWorkspaceProjectMetrics,
+} from "@/lib/cache/read-models";
 import { productContent } from "@/content/product";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { getDashboardMetrics, getReplyRateByCampaign } from "@/services/analytics-service";
 
 type AnalyticsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -22,16 +27,26 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     workspace.activeProject;
   const activeFilterProjectId = isAllProjects ? undefined : selectedProject.id;
 
-  const [metrics, chartData, projectBreakdown] = await Promise.all([
-    getDashboardMetrics(workspace.workspaceId, activeFilterProjectId ? { projectId: activeFilterProjectId } : undefined),
-    getReplyRateByCampaign(workspace.workspaceId, activeFilterProjectId ? { projectId: activeFilterProjectId } : undefined),
-    Promise.all(
-      workspace.availableProjects.map(async (project) => ({
-        project,
-        metrics: await getDashboardMetrics(workspace.workspaceId, { projectId: project.id }),
-      })),
-    ),
+  const [metrics, chartData, projectMetrics] = await Promise.all([
+    getCachedDashboardMetrics(workspace.userId, workspace.workspaceId, activeFilterProjectId),
+    getCachedReplyRateByCampaign(workspace.userId, workspace.workspaceId, activeFilterProjectId),
+    getCachedWorkspaceProjectMetrics(workspace.userId, workspace.workspaceId),
   ]);
+  const projectMetricsById = new Map(projectMetrics.map((item) => [item.projectId, item]));
+  const projectBreakdown = workspace.availableProjects.map((project) => ({
+    project,
+    metrics:
+      projectMetricsById.get(project.id) ?? {
+        totalLeads: 0,
+        queued: 0,
+        sent: 0,
+        followupSent: 0,
+        replied: 0,
+        unsubscribed: 0,
+        failed: 0,
+        replyRate: 0,
+      },
+  }));
 
   return (
     <div className="grid gap-8">
@@ -41,18 +56,21 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
         description={productContent.analytics.description}
         actions={
           <form method="get" className="flex flex-wrap items-center gap-3">
-            <select
+            <LiquidSelect
               name="projectId"
               defaultValue={isAllProjects ? "all" : selectedProject.id}
-              className="glass-control h-11 min-w-[14rem] rounded-[1rem] border-0 px-4 text-sm shadow-none"
-            >
-              <option value="all">{productContent.analytics.allProjectsLabel}</option>
-              {workspace.availableProjects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
+              ariaLabel="Filter analytics by project"
+              placeholder="Choose a project"
+              triggerClassName="min-w-[14rem]"
+              options={[
+                { value: "all", label: productContent.analytics.allProjectsLabel, description: "Compare every project" },
+                ...workspace.availableProjects.map((project) => ({
+                  value: project.id,
+                  label: project.name,
+                  description: project.website || project.brand_name || "Project",
+                })),
+              ]}
+            />
             <Button type="submit" size="sm">
               Apply filter
             </Button>

@@ -109,42 +109,47 @@ export const workflowDefinitionSchema = z.object({
   steps: z.array(workflowStepSchema).min(1).max(5),
 });
 
-const campaignBaseSchema = z.object({
+const campaignCommonFields = {
   campaignName: z.string().min(2).max(120),
-  gmailAccountId: z.string().uuid(),
   contactListId: z.string().uuid().optional().or(z.literal("")),
   targetContactIds: z.array(z.string().uuid()).min(1),
   timezone: z.string().min(2),
   sendWindowStart: z.string().regex(/^\d{2}:\d{2}$/),
   sendWindowEnd: z.string().regex(/^\d{2}:\d{2}$/),
   dailySendLimit: z.coerce.number().int().min(1).max(500),
+};
+
+const campaignBaseSchema = z.object({
+  ...campaignCommonFields,
+  mailboxAccountId: z.string().uuid(),
 });
 
 export const campaignBuilderSchema = campaignBaseSchema.extend({
   workflowDefinition: workflowDefinitionSchema,
 });
 
-const legacyCampaignLaunchSchema = campaignBaseSchema.extend({
+const legacyCampaignLaunchSchema = z.object({
+  ...campaignCommonFields,
+  gmailAccountId: z.string().uuid(),
   primaryStep: campaignStepSchema,
   followupStep: campaignStepSchema,
-});
+}).transform((value) => ({
+  campaignName: value.campaignName,
+  mailboxAccountId: value.gmailAccountId,
+  contactListId: value.contactListId,
+  targetContactIds: value.targetContactIds,
+  timezone: value.timezone,
+  sendWindowStart: value.sendWindowStart,
+  sendWindowEnd: value.sendWindowEnd,
+  dailySendLimit: value.dailySendLimit,
+  workflowDefinition: buildLegacyWorkflowDefinition({
+    followUpDelayDays: 2,
+    primaryStep: value.primaryStep,
+    followupStep: value.followupStep,
+  }),
+}));
 
-export const campaignLaunchSchema = z
-  .union([campaignBuilderSchema, legacyCampaignLaunchSchema])
-  .transform((value) => {
-    if ("workflowDefinition" in value) {
-      return value;
-    }
-
-    return {
-      ...value,
-      workflowDefinition: buildLegacyWorkflowDefinition({
-        followUpDelayDays: 2,
-        primaryStep: value.primaryStep,
-        followupStep: value.followupStep,
-      }),
-    };
-  });
+export const campaignLaunchSchema = z.union([campaignBuilderSchema, legacyCampaignLaunchSchema]);
 
 export const googleSheetsImportSchema = z.object({
   url: z.url(),

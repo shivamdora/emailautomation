@@ -1,11 +1,12 @@
 import { CampaignWizard } from "@/components/campaigns/campaign-wizard";
 import { PageHeader } from "@/components/layout/page-header";
 import { productContent } from "@/content/product";
+import { getCachedContacts, getCachedTemplates } from "@/lib/cache/read-models";
 import { getWorkspaceContext } from "@/lib/db/workspace";
+import type { TemplateListItem } from "@/lib/templates/gallery";
 import { buildWorkflowDefinitionFromStoredSteps, normalizeWorkflowDefinition } from "@/lib/workflows/definition";
-import { getCampaignForEditing, listTemplates } from "@/services/campaign-service";
-import { getWorkspaceGmailAccounts } from "@/services/gmail-service";
-import { listContacts } from "@/services/import-service";
+import { getCampaignForEditing } from "@/services/campaign-service";
+import { getWorkspaceMailboxAccounts } from "@/services/mailbox-service";
 
 export default async function EditCampaignPage({
   params,
@@ -14,23 +15,21 @@ export default async function EditCampaignPage({
 }) {
   const { campaignId } = await params;
   const workspace = await getWorkspaceContext();
-  const [campaign, rawGmailAccounts, contacts, rawTemplates] = await Promise.all([
+  const [campaign, rawMailboxAccounts, contacts, rawTemplates] = await Promise.all([
     getCampaignForEditing(campaignId, workspace.workspaceId, workspace.activeProjectId),
-    getWorkspaceGmailAccounts(workspace.workspaceId, {
+    getWorkspaceMailboxAccounts(workspace.workspaceId, {
       onlyApproved: true,
       projectId: workspace.activeProjectId,
     }),
-    listContacts(workspace.workspaceId, workspace.activeProjectId),
-    listTemplates(workspace.workspaceId, workspace.activeProjectId),
+    getCachedContacts(workspace.userId, workspace.workspaceId, workspace.activeProjectId),
+    getCachedTemplates(workspace.userId, workspace.workspaceId, workspace.activeProjectId),
   ]);
-  const gmailAccounts = rawGmailAccounts as Array<{ id: string; email_address: string }>;
-  const templates = rawTemplates as Array<{
+  const mailboxAccounts = rawMailboxAccounts as Array<{
     id: string;
-    name: string;
-    subject_template: string;
-    body_template: string;
-    body_html_template?: string | null;
+    email_address: string;
+    provider: "gmail" | "outlook";
   }>;
+  const templates = rawTemplates as TemplateListItem[];
   const workflowDefinition = normalizeWorkflowDefinition(campaign.workflow_definition_jsonb);
   const fallbackWorkflow = buildWorkflowDefinitionFromStoredSteps(campaign.campaign_steps ?? []);
   const resolvedWorkflow = workflowDefinition.steps.length ? workflowDefinition : fallbackWorkflow;
@@ -45,12 +44,12 @@ export default async function EditCampaignPage({
       <CampaignWizard
         mode="edit"
         campaignId={campaignId}
-        gmailAccounts={gmailAccounts}
+        mailboxAccounts={mailboxAccounts}
         contacts={contacts}
         templates={templates}
         initialValues={{
           campaignName: campaign.name,
-          gmailAccountId: campaign.gmail_account_id,
+          mailboxAccountId: campaign.mailbox_account_id ?? campaign.gmail_account_id,
           contactListId: "",
           targetContactIds: (campaign.campaign_contacts ?? [])
             .filter((contact) => contact.status !== "skipped")

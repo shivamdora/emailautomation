@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateProjectReadModels } from "@/lib/cache/invalidation";
 import { getWorkspaceContext } from "@/lib/db/workspace";
 import { pauseCampaignSchema } from "@/lib/zod/schemas";
 import { pauseCampaign } from "@/services/campaign-service";
@@ -21,6 +22,14 @@ export async function POST(request: Request) {
     workspace.workspaceId,
     workspace.activeProjectId,
     payload.data.status,
+  );
+  await invalidateProjectReadModels(
+    {
+      userId: workspace.userId,
+      workspaceId: workspace.workspaceId,
+      projectId: workspace.activeProjectId,
+    },
+    { includeWorkspace: true },
   );
 
   if (contentType.includes("application/json")) {

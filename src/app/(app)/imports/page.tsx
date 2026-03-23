@@ -4,8 +4,8 @@ import { ImportPanel } from "@/components/imports/import-panel";
 import { ImportMapper } from "@/components/imports/import-mapper";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getCachedImports } from "@/lib/cache/read-models";
 import { getWorkspaceContext } from "@/lib/db/workspace";
-import { listImports } from "@/services/import-service";
 
 type ImportsPageProps = {
   searchParams?: Promise<{
@@ -43,7 +43,11 @@ function getImportBanner(status?: string, error?: string, count?: string) {
 export default async function ImportsPage({ searchParams }: ImportsPageProps) {
   const params = (await searchParams) ?? {};
   const workspace = await getWorkspaceContext();
-  const imports = (await listImports(workspace.workspaceId, workspace.activeProjectId)) as Array<{
+  const imports = (await getCachedImports(
+    workspace.userId,
+    workspace.workspaceId,
+    workspace.activeProjectId,
+  )) as Array<{
     id: string;
     file_name: string | null;
     source_type: string;

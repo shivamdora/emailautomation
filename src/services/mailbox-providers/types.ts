@@ -1,3 +1,5 @@
+export type MailboxProviderKey = "gmail" | "outlook";
+
 export type SendMessageInput = {
   accessToken: string;
   fromEmail: string;
@@ -6,6 +8,7 @@ export type SendMessageInput = {
   bodyHtml: string;
   bodyText: string;
   replyThreadId?: string | null;
+  replyMessageId?: string | null;
 };
 
 export type ProviderTokenState = {
@@ -17,16 +20,16 @@ export type ProviderTokenState = {
 export type SyncThreadsInput = {
   accessToken: string;
   userEmail: string;
-  historyId?: string | null;
+  syncCursor?: string | null;
   recentThreadIds?: string[];
 };
 
 export type SyncResult = {
-  historyId?: string | null;
+  syncCursor?: string | null;
   threads: Array<{
-    gmailThreadId: string;
+    providerThreadId: string;
     messages: Array<{
-      gmailMessageId: string;
+      providerMessageId: string;
       direction: "outbound" | "inbound";
       fromEmail: string | null;
       toEmails: string[];
@@ -41,8 +44,8 @@ export type SyncResult = {
 };
 
 export type ReplyDetectionResult = {
-  gmailThreadId: string;
-  gmailMessageId: string;
+  providerThreadId: string;
+  providerMessageId: string;
   sentAt: string;
   fromEmail: string | null;
 };

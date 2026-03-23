@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+const booleanFlagSchema = z.preprocess((value) => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return /^(1|true|yes|on)$/i.test(value.trim());
+  }
+
+  return false;
+}, z.boolean());
+
 const envSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
@@ -10,13 +22,31 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_OAUTH_REDIRECT_URI: z.string().optional(),
+  MICROSOFT_CLIENT_ID: z.string().optional(),
+  MICROSOFT_CLIENT_SECRET: z.string().optional(),
+  MICROSOFT_OAUTH_REDIRECT_URI: z.string().optional(),
+  MICROSOFT_TENANT_ID: z.string().optional(),
   HUBSPOT_CLIENT_ID: z.string().optional(),
   HUBSPOT_CLIENT_SECRET: z.string().optional(),
   HUBSPOT_OAUTH_REDIRECT_URI: z.string().optional(),
+  PIPEDRIVE_CLIENT_ID: z.string().optional(),
+  PIPEDRIVE_CLIENT_SECRET: z.string().optional(),
+  PIPEDRIVE_OAUTH_REDIRECT_URI: z.string().optional(),
+  ZOHO_CLIENT_ID: z.string().optional(),
+  ZOHO_CLIENT_SECRET: z.string().optional(),
+  ZOHO_OAUTH_REDIRECT_URI: z.string().optional(),
+  ZOHO_ACCOUNTS_BASE_URL: z.string().url().optional(),
+  ZOHO_API_BASE_URL: z.string().url().optional(),
   SALESFORCE_CLIENT_ID: z.string().optional(),
   SALESFORCE_CLIENT_SECRET: z.string().optional(),
   SALESFORCE_OAUTH_REDIRECT_URI: z.string().optional(),
   SALESFORCE_AUTH_BASE_URL: z.string().url().optional(),
+  SLACK_CLIENT_ID: z.string().optional(),
+  SLACK_CLIENT_SECRET: z.string().optional(),
+  SLACK_OAUTH_REDIRECT_URI: z.string().optional(),
+  CALENDLY_CLIENT_ID: z.string().optional(),
+  CALENDLY_CLIENT_SECRET: z.string().optional(),
+  CALENDLY_OAUTH_REDIRECT_URI: z.string().optional(),
   TOKEN_ENCRYPTION_KEY: z.string().min(32).optional(),
   CUSTOM_CRM_API_KEYS: z.string().optional(),
   SHARED_WORKSPACE_NAME: z.string().optional(),
@@ -26,6 +56,11 @@ const envSchema = z.object({
   FOLLOW_UP_DELAY_DAYS: z.coerce.number().default(2),
   SEED_MONITOR_INTERVAL_MINUTES: z.coerce.number().default(30),
   SUPABASE_CRON_VERIFY_SECRET: z.string().optional(),
+  USE_REDIS_CACHE: booleanFlagSchema.default(false),
+  REDIS_CACHE_MODE: z.enum(["off", "shadow", "live"]).default("off"),
+  REDIS_CACHE_PREFIX: z.string().min(1).default("outboundflow:v1"),
+  UPSTASH_REDIS_REST_URL: z.string().url().optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
 });
 
 const rawEnv = {
@@ -38,13 +73,31 @@ const rawEnv = {
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
   GOOGLE_OAUTH_REDIRECT_URI: process.env.GOOGLE_OAUTH_REDIRECT_URI,
+  MICROSOFT_CLIENT_ID: process.env.MICROSOFT_CLIENT_ID,
+  MICROSOFT_CLIENT_SECRET: process.env.MICROSOFT_CLIENT_SECRET,
+  MICROSOFT_OAUTH_REDIRECT_URI: process.env.MICROSOFT_OAUTH_REDIRECT_URI,
+  MICROSOFT_TENANT_ID: process.env.MICROSOFT_TENANT_ID,
   HUBSPOT_CLIENT_ID: process.env.HUBSPOT_CLIENT_ID,
   HUBSPOT_CLIENT_SECRET: process.env.HUBSPOT_CLIENT_SECRET,
   HUBSPOT_OAUTH_REDIRECT_URI: process.env.HUBSPOT_OAUTH_REDIRECT_URI,
+  PIPEDRIVE_CLIENT_ID: process.env.PIPEDRIVE_CLIENT_ID,
+  PIPEDRIVE_CLIENT_SECRET: process.env.PIPEDRIVE_CLIENT_SECRET,
+  PIPEDRIVE_OAUTH_REDIRECT_URI: process.env.PIPEDRIVE_OAUTH_REDIRECT_URI,
+  ZOHO_CLIENT_ID: process.env.ZOHO_CLIENT_ID,
+  ZOHO_CLIENT_SECRET: process.env.ZOHO_CLIENT_SECRET,
+  ZOHO_OAUTH_REDIRECT_URI: process.env.ZOHO_OAUTH_REDIRECT_URI,
+  ZOHO_ACCOUNTS_BASE_URL: process.env.ZOHO_ACCOUNTS_BASE_URL,
+  ZOHO_API_BASE_URL: process.env.ZOHO_API_BASE_URL,
   SALESFORCE_CLIENT_ID: process.env.SALESFORCE_CLIENT_ID,
   SALESFORCE_CLIENT_SECRET: process.env.SALESFORCE_CLIENT_SECRET,
   SALESFORCE_OAUTH_REDIRECT_URI: process.env.SALESFORCE_OAUTH_REDIRECT_URI,
   SALESFORCE_AUTH_BASE_URL: process.env.SALESFORCE_AUTH_BASE_URL,
+  SLACK_CLIENT_ID: process.env.SLACK_CLIENT_ID,
+  SLACK_CLIENT_SECRET: process.env.SLACK_CLIENT_SECRET,
+  SLACK_OAUTH_REDIRECT_URI: process.env.SLACK_OAUTH_REDIRECT_URI,
+  CALENDLY_CLIENT_ID: process.env.CALENDLY_CLIENT_ID,
+  CALENDLY_CLIENT_SECRET: process.env.CALENDLY_CLIENT_SECRET,
+  CALENDLY_OAUTH_REDIRECT_URI: process.env.CALENDLY_OAUTH_REDIRECT_URI,
   TOKEN_ENCRYPTION_KEY: process.env.TOKEN_ENCRYPTION_KEY,
   CUSTOM_CRM_API_KEYS: process.env.CUSTOM_CRM_API_KEYS,
   SHARED_WORKSPACE_NAME: process.env.SHARED_WORKSPACE_NAME,
@@ -54,6 +107,11 @@ const rawEnv = {
   FOLLOW_UP_DELAY_DAYS: process.env.FOLLOW_UP_DELAY_DAYS,
   SEED_MONITOR_INTERVAL_MINUTES: process.env.SEED_MONITOR_INTERVAL_MINUTES,
   SUPABASE_CRON_VERIFY_SECRET: process.env.SUPABASE_CRON_VERIFY_SECRET,
+  USE_REDIS_CACHE: process.env.USE_REDIS_CACHE,
+  REDIS_CACHE_MODE: process.env.REDIS_CACHE_MODE,
+  REDIS_CACHE_PREFIX: process.env.REDIS_CACHE_PREFIX,
+  UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
+  UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
 };
 
 const parsed = envSchema.safeParse(rawEnv);
@@ -65,6 +123,9 @@ export const env = parsed.success
       DEFAULT_PER_MINUTE_THROTTLE: 10,
       FOLLOW_UP_DELAY_DAYS: 2,
       SEED_MONITOR_INTERVAL_MINUTES: 30,
+      USE_REDIS_CACHE: false,
+      REDIS_CACHE_MODE: "off" as const,
+      REDIS_CACHE_PREFIX: "outboundflow:v1",
     };
 
 function isPlaceholderSecret(value?: string) {
@@ -87,16 +148,48 @@ export const isGoogleConfigured = Boolean(
     env.TOKEN_ENCRYPTION_KEY,
 );
 
+export const isMicrosoftConfigured = Boolean(
+  env.MICROSOFT_CLIENT_ID &&
+    env.MICROSOFT_CLIENT_SECRET &&
+    env.TOKEN_ENCRYPTION_KEY,
+);
+
 export const isHubSpotConfigured = Boolean(
   env.HUBSPOT_CLIENT_ID &&
     env.HUBSPOT_CLIENT_SECRET &&
     env.HUBSPOT_OAUTH_REDIRECT_URI,
 );
 
+export const isPipedriveConfigured = Boolean(
+  env.PIPEDRIVE_CLIENT_ID &&
+    env.PIPEDRIVE_CLIENT_SECRET,
+);
+
+export const isZohoConfigured = Boolean(
+  env.ZOHO_CLIENT_ID &&
+    env.ZOHO_CLIENT_SECRET,
+);
+
 export const isSalesforceConfigured = Boolean(
   env.SALESFORCE_CLIENT_ID &&
     env.SALESFORCE_CLIENT_SECRET &&
     env.SALESFORCE_OAUTH_REDIRECT_URI,
+);
+
+export const isSlackConfigured = Boolean(
+  env.SLACK_CLIENT_ID &&
+    env.SLACK_CLIENT_SECRET,
+);
+
+export const isCalendlyConfigured = Boolean(
+  env.CALENDLY_CLIENT_ID &&
+    env.CALENDLY_CLIENT_SECRET,
+);
+
+export const isRedisCacheConfigured = Boolean(
+  env.USE_REDIS_CACHE &&
+    env.UPSTASH_REDIS_REST_URL &&
+    env.UPSTASH_REDIS_REST_TOKEN,
 );
 
 export function requireSupabaseConfiguration() {
@@ -111,6 +204,46 @@ export function requireGoogleConfiguration() {
   if (!isGoogleConfigured) {
     throw new Error(
       "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and TOKEN_ENCRYPTION_KEY.",
+    );
+  }
+}
+
+export function requireMicrosoftConfiguration() {
+  if (!isMicrosoftConfigured) {
+    throw new Error(
+      "Microsoft OAuth is not configured. Set MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, and TOKEN_ENCRYPTION_KEY.",
+    );
+  }
+}
+
+export function requirePipedriveConfiguration() {
+  if (!isPipedriveConfigured) {
+    throw new Error(
+      "Pipedrive OAuth is not configured. Set PIPEDRIVE_CLIENT_ID and PIPEDRIVE_CLIENT_SECRET.",
+    );
+  }
+}
+
+export function requireZohoConfiguration() {
+  if (!isZohoConfigured) {
+    throw new Error(
+      "Zoho OAuth is not configured. Set ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET.",
+    );
+  }
+}
+
+export function requireSlackConfiguration() {
+  if (!isSlackConfigured) {
+    throw new Error(
+      "Slack OAuth is not configured. Set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET.",
+    );
+  }
+}
+
+export function requireCalendlyConfiguration() {
+  if (!isCalendlyConfigured) {
+    throw new Error(
+      "Calendly OAuth is not configured. Set CALENDLY_CLIENT_ID and CALENDLY_CLIENT_SECRET.",
     );
   }
 }
