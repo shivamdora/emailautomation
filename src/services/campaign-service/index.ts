@@ -25,6 +25,7 @@ import { instrumentHtmlForTracking, recordMessageEvent } from "@/services/teleme
 import { getSeedTemplateDefinitions } from "@/services/template-seed-service";
 import {
   cancelPendingCampaignJobs,
+  isQueueSchemaCompatibilityError,
   reconcileCampaignJobs,
   requeueFailedCampaignContact,
 } from "@/services/campaign-send-queue-service";
@@ -658,8 +659,284 @@ type DueCampaignContact = {
   outbound_messages?: Array<{ step_number: number }> | null;
 };
 
+async function loadLegacyDueCampaignContacts(campaignId: string, options?: { limit?: number; dueBefore?: string }) {
+  const supabase = createAdminSupabaseClient();
+  const dueBefore = options?.dueBefore ?? new Date().toISOString();
+  const limit = options?.limit ?? 250;
+  let result = await supabase
+    .from("campaign_contacts")
+    .select(
+      `
+      id,
+      campaign_id,
+      contact_id,
+      current_step,
+      current_node_key,
+      branch_history_jsonb,
+      status,
+      failed_attempts,
+      next_due_at,
+      last_thread_id,
+      last_message_id,
+      contact:contacts(
+        email,
+        first_name,
+        last_name,
+        company,
+        website,
+        job_title,
+        custom_fields_jsonb,
+        unsubscribed_at
+      ),
+      campaign:campaigns(
+        id,
+        workspace_id,
+        project_id,
+        name,
+        status,
+        mailbox_account_id,
+        gmail_account_id,
+        workflow_definition_jsonb,
+        daily_send_limit,
+        send_window_start,
+        send_window_end,
+        timezone,
+        campaign_steps(step_number, step_type, subject_template, body_template, body_html_template, wait_days)
+      ),
+      outbound_messages(step_number)
+    `,
+    )
+    .eq("campaign_id", campaignId)
+    .not("next_due_at", "is", null)
+    .lte("next_due_at", dueBefore)
+    .in("status", ["queued", "followup_due", "sent"])
+    .order("next_due_at", { ascending: true })
+    .limit(limit);
+
+  if (
+    isAnyMissingColumnResult(result, [
+      { table: "campaigns", column: "mailbox_account_id" },
+      { table: "campaign_steps", column: "body_html_template" },
+    ])
+  ) {
+    result = await supabase
+      .from("campaign_contacts")
+      .select(
+        `
+        id,
+        campaign_id,
+        contact_id,
+        current_step,
+        current_node_key,
+        branch_history_jsonb,
+        status,
+        failed_attempts,
+        next_due_at,
+        last_thread_id,
+        last_message_id,
+        contact:contacts(
+          email,
+          first_name,
+          last_name,
+          company,
+          website,
+          job_title,
+          custom_fields_jsonb,
+          unsubscribed_at
+        ),
+        campaign:campaigns(
+          id,
+          workspace_id,
+          project_id,
+          name,
+          status,
+          gmail_account_id,
+          workflow_definition_jsonb,
+          daily_send_limit,
+          send_window_start,
+          send_window_end,
+          timezone,
+          campaign_steps(step_number, step_type, subject_template, body_template, wait_days)
+        ),
+        outbound_messages(step_number)
+      `,
+      )
+      .eq("campaign_id", campaignId)
+      .not("next_due_at", "is", null)
+      .lte("next_due_at", dueBefore)
+      .in("status", ["queued", "followup_due", "sent"])
+      .order("next_due_at", { ascending: true })
+      .limit(limit);
+  }
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  return (result.data as DueCampaignContact[] | null) ?? [];
+}
+
+async function processLegacyCampaignSends(
+  campaignId: string,
+  options?: { ignoreSendWindow?: boolean; limit?: number },
+) {
+  const contacts = await loadLegacyDueCampaignContacts(campaignId, { limit: options?.limit });
+  let processed = 0;
+
+  for (const contact of contacts) {
+    const result = await processCampaignContact(contact, {
+      ignoreSendWindow: options?.ignoreSendWindow,
+    });
+
+    if (result.processed) {
+      processed += 1;
+    }
+  }
+
+  return { processed, eligible: contacts.length };
+}
+
+async function reconcileCampaignJobsWithFallback(campaignId: string) {
+  try {
+    await reconcileCampaignJobs(campaignId);
+    return { usingLegacyMode: false };
+  } catch (error) {
+    if (!isQueueSchemaCompatibilityError(error)) {
+      throw error;
+    }
+
+    return { usingLegacyMode: true };
+  }
+}
+
+async function retryFailedCampaignContactsForLegacySend(campaignId: string) {
+  const supabase = createAdminSupabaseClient();
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("campaign_contacts")
+    .select("id, current_step")
+    .eq("campaign_id", campaignId)
+    .eq("status", "failed")
+    .limit(250);
+
+  if (error) {
+    throw error;
+  }
+
+  const failedContacts = ((data ?? []) as Array<{ id: string; current_step: number }>).filter(Boolean);
+
+  for (const contact of failedContacts) {
+    await supabase
+      .from("campaign_contacts")
+      .update({
+        status: contact.current_step > 1 ? "followup_due" : "queued",
+        next_due_at: nowIso,
+        error_message: null,
+      })
+      .eq("id", contact.id);
+  }
+
+  return failedContacts.length;
+}
+
+function getSendNowFailureMessage(input: {
+  provider?: string | null;
+  mailboxEmail?: string | null;
+  errorMessage?: string | null;
+}) {
+  const provider = input.provider === "outlook" ? "Outlook" : "Gmail";
+  const mailboxLabel = input.mailboxEmail?.trim() ? ` for ${input.mailboxEmail.trim()}` : "";
+  const normalized = (input.errorMessage ?? "").trim().toLowerCase();
+
+  if (normalized.includes("unauthorized_client")) {
+    return `${provider} mailbox authorization failed${mailboxLabel}. Reconnect the mailbox in Settings > Sending, then retry Send now.`;
+  }
+
+  if (normalized.includes("invalid_grant")) {
+    return `${provider} mailbox session expired${mailboxLabel}. Reconnect the mailbox in Settings > Sending, then retry Send now.`;
+  }
+
+  if (normalized.includes("missing refresh token")) {
+    return `${provider} mailbox refresh token is missing${mailboxLabel}. Reconnect the mailbox in Settings > Sending, then retry Send now.`;
+  }
+
+  if (normalized.includes("pending workspace approval")) {
+    return `${provider} mailbox${mailboxLabel} is still pending workspace approval. Approve it in Settings > Sending, then retry Send now.`;
+  }
+
+  return input.errorMessage?.trim() || "Campaign contacts are currently blocked from sending. Check the mailbox connection and retry.";
+}
+
+async function assertCampaignSendNowNotBlocked(campaignId: string) {
+  const supabase = createAdminSupabaseClient();
+  const nowIso = new Date().toISOString();
+  const [{ count: dueQueueJobsCount }, { count: dueLegacyContactsCount }, { data: latestFailure }] = await Promise.all([
+    supabase
+      .from("campaign_send_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .in("status", ["pending", "reserved"])
+      .lte("scheduled_for", nowIso),
+    supabase
+      .from("campaign_contacts")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .in("status", ["queued", "followup_due", "sent"])
+      .not("next_due_at", "is", null)
+      .lte("next_due_at", nowIso),
+    supabase
+      .from("campaign_contacts")
+      .select(
+        "error_message, campaign:campaigns(mailbox:mailbox_accounts(provider, email_address), gmail:gmail_accounts(email_address))",
+      )
+      .eq("campaign_id", campaignId)
+      .eq("status", "failed")
+      .not("error_message", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if ((dueQueueJobsCount ?? 0) > 0 || (dueLegacyContactsCount ?? 0) > 0) {
+    return;
+  }
+
+  const failure = latestFailure as
+    | {
+        error_message?: string | null;
+        campaign?: {
+          mailbox?: { provider?: string | null; email_address?: string | null } | null;
+          gmail?: { email_address?: string | null } | null;
+        } | null;
+      }
+    | null;
+
+  if (!failure?.error_message) {
+    return;
+  }
+
+  throw new Error(
+    getSendNowFailureMessage({
+      provider: failure.campaign?.mailbox?.provider ?? "gmail",
+      mailboxEmail: failure.campaign?.mailbox?.email_address ?? failure.campaign?.gmail?.email_address ?? null,
+      errorMessage: failure.error_message,
+    }),
+  );
+}
+
+function shouldFallbackToLegacySendWorker(
+  response: Response,
+  payload: { error?: string; message?: string; code?: string } | null,
+) {
+  if (response.status === 404) {
+    return true;
+  }
+
+  const message = `${payload?.error ?? ""} ${payload?.message ?? ""}`.toLowerCase();
+  return payload?.code === "NOT_FOUND" || message.includes("requested function was not found");
+}
+
 // Legacy helper kept temporarily while the queue rollout settles; campaign delivery now runs through campaign_send_jobs.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function processCampaignContact(item: DueCampaignContact, options?: { ignoreSendWindow?: boolean }) {
   const supabase = createAdminSupabaseClient();
   const campaign = item.campaign;
@@ -953,7 +1230,7 @@ export async function createCampaign(input: {
     })),
   );
 
-  await reconcileCampaignJobs(campaign.id);
+  await reconcileCampaignJobsWithFallback(campaign.id);
   await refreshWorkspaceUsageCounters(input.workspaceId);
 
   return { id: campaign.id, launched: true };
@@ -1093,9 +1370,15 @@ export async function updateCampaign(input: {
     }
 
     if (!["replied", "followup_sent", "unsubscribed"].includes(contact.status)) {
-      await cancelPendingCampaignJobs(contact.id, {
-        reason: "Removed during campaign edit",
-      });
+      try {
+        await cancelPendingCampaignJobs(contact.id, {
+          reason: "Removed during campaign edit",
+        });
+      } catch (error) {
+        if (!isQueueSchemaCompatibilityError(error)) {
+          throw error;
+        }
+      }
       await supabase
         .from("campaign_contacts")
         .update({
@@ -1123,7 +1406,7 @@ export async function updateCampaign(input: {
     );
   }
 
-  await reconcileCampaignJobs(input.campaignId);
+  await reconcileCampaignJobsWithFallback(input.campaignId);
   return { id: input.campaignId, updated: true };
 }
 
@@ -1177,7 +1460,7 @@ export async function pauseCampaign(
   }
 
   if (status === "active") {
-    await reconcileCampaignJobs(campaignId);
+    await reconcileCampaignJobsWithFallback(campaignId);
   }
 
   return { campaignId, status };
@@ -1206,7 +1489,34 @@ export async function sendCampaignNow(campaignId: string, workspaceId: string, p
   if (!campaign) {
     throw new Error("Campaign not found.");
   }
-  await reconcileCampaignJobs(campaignId);
+  const queueMode = await reconcileCampaignJobsWithFallback(campaignId);
+
+  if (queueMode.usingLegacyMode) {
+    let legacyResult = await processLegacyCampaignSends(campaignId, {
+      ignoreSendWindow: true,
+      limit: 250,
+    });
+
+    if (legacyResult.processed === 0) {
+      const retriedCount = await retryFailedCampaignContactsForLegacySend(campaignId);
+
+      if (retriedCount > 0) {
+        legacyResult = await processLegacyCampaignSends(campaignId, {
+          ignoreSendWindow: true,
+          limit: 250,
+        });
+      }
+    }
+
+    if (legacyResult.processed === 0) {
+      await assertCampaignSendNowNotBlocked(campaignId);
+    }
+
+    return {
+      campaignId,
+      processed: legacyResult.processed,
+    };
+  }
 
   const functionUrl = `${env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-due-messages`;
   const response = await fetch(functionUrl, {
@@ -1226,11 +1536,42 @@ export async function sendCampaignNow(campaignId: string, workspaceId: string, p
     }),
   });
   const payload = (await response.json().catch(() => null)) as
-    | { processed?: number; error?: string }
+    | { processed?: number; error?: string; message?: string; code?: string }
     | null;
 
   if (!response.ok) {
-    throw new Error(payload?.error ?? "Failed to trigger the campaign send worker.");
+    if (shouldFallbackToLegacySendWorker(response, payload)) {
+      let legacyResult = await processLegacyCampaignSends(campaignId, {
+        ignoreSendWindow: true,
+        limit: 250,
+      });
+
+      if (legacyResult.processed === 0) {
+        const retriedCount = await retryFailedCampaignContactsForLegacySend(campaignId);
+
+        if (retriedCount > 0) {
+          legacyResult = await processLegacyCampaignSends(campaignId, {
+            ignoreSendWindow: true,
+            limit: 250,
+          });
+        }
+      }
+
+      if (legacyResult.processed === 0) {
+        await assertCampaignSendNowNotBlocked(campaignId);
+      }
+
+      return {
+        campaignId,
+        processed: legacyResult.processed,
+      };
+    }
+
+    throw new Error(payload?.error ?? payload?.message ?? "Failed to trigger the campaign send worker.");
+  }
+
+  if (Number(payload?.processed ?? 0) === 0) {
+    await assertCampaignSendNowNotBlocked(campaignId);
   }
 
   return {

@@ -65,19 +65,46 @@ type QueueErrorLike = {
   code?: string | null;
 } | null | undefined;
 
+function isMissingRpcError(message: string | null | undefined, rpcName: string) {
+  const normalized = (message ?? "").toLowerCase();
+  const rpc = rpcName.toLowerCase();
+
+  return normalized.includes(rpc) && (normalized.includes("does not exist") || normalized.includes("schema cache"));
+}
+
 function isQueueSchemaMissingError(error: QueueErrorLike) {
   const message = error?.message?.toLowerCase() ?? "";
 
   return (
     isMissingTableError(error?.message, "campaign_send_jobs") ||
     isMissingTableError(error?.message, "campaign_queue_runs") ||
-    message.includes("reserve_campaign_send_jobs") && message.includes("does not exist")
+    isMissingRpcError(error?.message, "reserve_campaign_send_jobs") ||
+    message.includes("schema cache") && message.includes("campaign send queue")
+  );
+}
+
+export function isQueueSchemaCompatibilityError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const queueError = error as QueueErrorLike;
+  const message = queueError?.message?.toLowerCase() ?? "";
+
+  return (
+    isQueueSchemaMissingError(queueError) ||
+    message.includes("campaign send queue requires the latest supabase migrations") ||
+    message.includes("campaign send queue requires the current supabase queue schema")
   );
 }
 
 function getQueueErrorMessage(context: string, error: QueueErrorLike, fallback: string) {
   if (isQueueSchemaMissingError(error)) {
-    return `Campaign send queue requires the latest Supabase migrations. Failed during ${context}: apply the current send queue migration, then reload the app.`;
+    return (
+      `Campaign send queue requires the current Supabase queue schema. Failed during ${context}: ` +
+      "apply the send queue migration if it has not been run, then run NOTIFY pgrst, 'reload schema'; " +
+      "in the Supabase SQL Editor and reload the app."
+    );
   }
 
   const parts = [error?.message, error?.details, error?.hint]
