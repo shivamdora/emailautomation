@@ -4,7 +4,6 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { useSyncExternalStore } from "react";
 import { LogOut, Settings2, Sparkles } from "lucide-react";
-import { GmailMark } from "@/components/icons/gmail-mark";
 import { ProjectSwitcher } from "@/components/layout/project-switcher";
 import { SidebarNav } from "@/components/layout/sidebar-nav";
 import { Button } from "@/components/ui/button";
@@ -196,12 +195,15 @@ export function AppShell({
             {isDesktopSidebarCollapsed ? (
               <div className="mt-5 grid justify-center gap-3">
                 <Link
-                  href="/settings/sending"
-                  aria-label={productContent.profile.gmailCard.connectLabel}
-                  title={productContent.profile.gmailCard.connectLabel}
-                  className="glass-chip flex size-12 items-center justify-center rounded-[1.25rem] text-sidebar-foreground transition hover:-translate-y-0.5 hover:shadow-[0_18px_34px_rgba(17,39,63,0.12)]"
+                  href="/settings"
+                  aria-label="Work Settings"
+                  title="Work Settings"
+                  className="glass-chip flex size-12 items-center justify-center rounded-[1.25rem] text-sidebar-foreground transition hover:-translate-y-0.5 hover:shadow-[0_18px_34px_rgba(17,39,63,0.12)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring"
                 >
-                  <GmailMark className="size-5" />
+                  <span className="sidebar-helper-settings-icon">
+                    <span className="sidebar-helper-settings-orb" />
+                    <Settings2 className="size-4.5 text-[var(--accent-foreground)]" />
+                  </span>
                 </Link>
                 <form action="/api/auth/sign-out" method="post">
                   <button
@@ -218,9 +220,6 @@ export function AppShell({
               <div className="sidebar-helper glass-control mt-6 min-h-fit shrink-0 overflow-hidden rounded-[30px] p-5 xl:p-6">
                 <p className="sidebar-helper-title text-sm font-semibold tracking-[-0.02em] text-sidebar-foreground">
                   {productContent.shell.helper.title}
-                </p>
-                <p className="sidebar-helper-copy mt-2 text-sm leading-6 text-sidebar-muted">
-                  {productContent.shell.helper.description}
                 </p>
                 <div className="sidebar-helper-actions">
                   <Button
