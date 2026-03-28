@@ -228,8 +228,8 @@ export default async function HomePage() {
                   Launch outbound that stays organized from first send to reply.
                 </h1>
                 <p className="max-w-2xl text-lg leading-8 text-white/80 md:text-xl">
-                  Import leads, send from Gmail, and keep every reply, follow-up, and
-                  campaign update in one shared workspace.
+                  Import leads, send from Gmail or Outlook, and keep every reply,
+                  follow-up, and campaign update in one shared workspace.
                 </p>
               </HydrationSafeDiv>
 
@@ -409,8 +409,8 @@ export default async function HomePage() {
                 Replace scattered outbound operations with one focused workspace.
               </h2>
               <p className="mt-5 text-lg leading-8 text-[#544e68]">
-                Set up your workspace, connect Gmail, load contacts, and launch
-                campaigns with reply visibility from day one.
+                Set up your workspace, connect Gmail or Outlook, load contacts, and
+                launch campaigns with reply visibility from day one.
               </p>
             </HydrationSafeDiv>
 
@@ -441,9 +441,22 @@ export default async function HomePage() {
       </section>
 
       <footer className="marketing-footer px-6 py-4 md:px-10 lg:px-14">
-        <HydrationSafeDiv className="mx-auto flex max-w-7xl items-center justify-between gap-4 border-t border-[#e7d6e3] pt-4 text-sm text-[#6f6882]">
-          <p>OutboundFlow</p>
-          <p>Built by the Cibirix SEO team</p>
+        <HydrationSafeDiv className="mx-auto flex max-w-7xl flex-col gap-4 border-t border-[#e7d6e3] pt-4 text-sm text-[#6f6882] md:flex-row md:items-center md:justify-between">
+          <HydrationSafeDiv>
+            <p>OutboundFlow</p>
+            <p className="mt-1 text-xs text-[#8a829c]">
+              Public product site for Gmail and Microsoft 365 outbound workflow tooling.
+            </p>
+          </HydrationSafeDiv>
+          <HydrationSafeDiv className="flex flex-wrap items-center gap-5">
+            <Link href="/privacy" className="transition hover:text-[#b4236d]">
+              Privacy Policy
+            </Link>
+            <Link href="/terms" className="transition hover:text-[#b4236d]">
+              Terms &amp; Conditions
+            </Link>
+            <p>Built by the Cibirix SEO team</p>
+          </HydrationSafeDiv>
         </HydrationSafeDiv>
       </footer>
     </main>
