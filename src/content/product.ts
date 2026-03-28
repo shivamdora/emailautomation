@@ -504,6 +504,7 @@ export const productContent: ProductContent = {
     ],
     helper: {
       title: "Project quick actions",
+      description: "Access workspace settings and account actions from one place.",
     },
     signOutLabel: "Sign out",
   },
