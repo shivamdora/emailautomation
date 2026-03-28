@@ -504,7 +504,6 @@ export const productContent: ProductContent = {
     ],
     helper: {
       title: "Project quick actions",
-      description: "Keep sender setup and the most-used project actions close without bloating the sidebar.",
     },
     signOutLabel: "Sign out",
   },

@@ -1,6 +1,7 @@
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { LazyReplyRateChart } from "@/components/dashboard/lazy-reply-rate-chart";
 import { PageHeader } from "@/components/layout/page-header";
+import { ProjectAvatar } from "@/components/projects/project-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,23 +56,26 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
         title={productContent.analytics.title}
         description={productContent.analytics.description}
         actions={
-          <form method="get" className="flex flex-wrap items-center gap-3">
+          <form method="get" className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-nowrap sm:items-center">
             <LiquidSelect
               name="projectId"
               defaultValue={isAllProjects ? "all" : selectedProject.id}
               ariaLabel="Filter analytics by project"
               placeholder="Choose a project"
-              triggerClassName="min-w-[14rem]"
+              triggerClassName="w-full sm:min-w-[16rem]"
               options={[
                 { value: "all", label: productContent.analytics.allProjectsLabel, description: "Compare every project" },
                 ...workspace.availableProjects.map((project) => ({
                   value: project.id,
                   label: project.name,
                   description: project.website || project.brand_name || "Project",
+                  avatarName: project.name,
+                  avatarBrandName: project.brand_name,
+                  avatarLogoUrl: project.logo_url,
                 })),
               ]}
             />
-            <Button type="submit" size="sm">
+            <Button type="submit" size="sm" className="shrink-0">
               Apply filter
             </Button>
           </form>
@@ -126,11 +130,19 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
             <Card key={project.id} id={`analytics-project-${project.id}`}>
               <CardHeader className="gap-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <CardTitle>{project.name}</CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      {project.website || project.brand_name || "Project profile"}
-                    </p>
+                  <div className="flex min-w-0 items-start gap-3">
+                    <ProjectAvatar
+                      name={project.name}
+                      brandName={project.brand_name}
+                      logoUrl={project.logo_url}
+                      sizeClassName="size-12 rounded-[1rem]"
+                    />
+                    <div className="min-w-0 space-y-1">
+                      <CardTitle className="truncate">{project.name}</CardTitle>
+                      <p className="truncate text-sm text-muted-foreground">
+                        {project.website || project.brand_name || "Project profile"}
+                      </p>
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {project.id === workspace.activeProjectId ? <Badge variant="success">Active</Badge> : null}

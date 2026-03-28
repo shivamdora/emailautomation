@@ -368,7 +368,7 @@ export async function listInboxThreadSummaries(
       to: number,
     ) => Promise<{ data: unknown; error: { message?: string | null } | null }>;
   };
-  const result = await orderedQuery.range(offset, offset + limit - 1);
+  const result = await orderedQuery.range(offset, offset + limit);
 
   const { data, error } = result;
 
@@ -422,7 +422,7 @@ export async function listInboxThreadSummaries(
 
   return {
     threads: threads.slice(0, limit),
-    hasMore: threads.length > limit,
+    hasMore: summaryRows.length > limit,
   };
 }
 

@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OutboundFlow | Gmail-First Outbound in One Calm Workspace</title>
+    <meta
+      name="description"
+      content="Import leads, launch Gmail-first sequences, and track replies from one shared outbound workspace."
+    >
+    <meta name="theme-color" content="#080a12">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="OutboundFlow | Gmail-First Outbound in One Calm Workspace">
+    <meta
+      property="og:description"
+      content="Import leads, launch Gmail-first sequences, and track replies from one shared outbound workspace."
+    >
+    <meta property="og:image" content="assets/outboundflow-dashboard.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="OutboundFlow | Gmail-First Outbound in One Calm Workspace">
+    <meta
+      name="twitter:description"
+      content="Import leads, launch Gmail-first sequences, and track replies from one shared outbound workspace."
+    >
+    <meta name="twitter:image" content="assets/outboundflow-dashboard.png">
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="assets/styles.css">
+    <script defer src="assets/app.js"></script>
+  </head>
+  <body>
+    <div class="page-noise" aria-hidden="true"></div>
+
+    <header class="site-header" data-header>
+      <a class="brandmark" href="#top" aria-label="OutboundFlow home">
+        <span class="brandmark-logo">
+          <img src="assets/rocket-logo.webp" alt="" width="44" height="44">
+        </span>
+        <span class="brandmark-copy">
+          <span class="brandmark-name">OutboundFlow</span>
+          <span class="brandmark-tag">gmail-first outbound workspace</span>
+        </span>
+      </a>
+
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav-panel"
+        data-nav-toggle
+      >
+        <span></span>
+        <span></span>
+        <span></span>
+        <span class="nav-toggle-label">Menu</span>
+      </button>
+
+      <div class="nav-panel" id="site-nav-panel" data-nav-panel>
+        <nav class="site-nav" aria-label="Primary">
+          <a href="#product" data-nav-link>Product</a>
+          <a href="#proof" data-nav-link>Proof</a>
+          <a href="#workflow" data-nav-link>Workflow</a>
+          <a href="#audience" data-nav-link>Audience</a>
+          <a href="#cta" data-nav-link>Start</a>
+        </nav>
+
+        <div class="header-actions">
+          <a class="button button-ghost" href="/sign-in">Sign in</a>
+          <a class="button button-primary" href="/sign-up">Start workspace</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" id="top" data-section="top">
+        <div class="hero-media-wrap" aria-hidden="true">
+          <video
+            class="hero-video"
+            data-hero-video
+            poster="assets/outboundflow-dashboard.png"
+            autoplay
+            muted
+            loop
+            playsinline
+            preload="metadata"
+          >
+            <source src="assets/outboundflow-hero.mp4" type="video/mp4">
+          </video>
+          <div class="hero-fallback"></div>
+          <div class="hero-shade"></div>
+          <div class="hero-grid"></div>
+        </div>
+
+        <div class="hero-inner">
+          <div class="hero-copy reveal" data-reveal>
+            <p class="eyebrow">Outbound campaign workspace</p>
+            <h1>Launch outbound that stays organized from first send to reply.</h1>
+            <p class="hero-description">
+              Import leads, send from Gmail, and keep every reply, follow-up, and campaign update
+              in one shared workspace.
+            </p>
+            <p class="hero-caption">
+              Built for founders, lean sales teams, and agencies that want clean execution without
+              adding more software.
+            </p>
+
+            <div class="hero-actions">
+              <a class="button button-primary" href="/sign-up">Start your workspace</a>
+              <a class="button button-ghost" href="/sign-in">Sign in</a>
+            </div>
+          </div>
+
+          <div class="hero-proof reveal" data-reveal>
+            <div class="hero-proof-line">
+              <span class="hero-proof-label">Gmail-native sending</span>
+              <span class="hero-proof-detail">Launch two-step campaigns from a real mailbox.</span>
+            </div>
+            <div class="hero-proof-line">
+              <span class="hero-proof-label">Shared reply visibility</span>
+              <span class="hero-proof-detail">Keep threads and context attached to the contact.</span>
+            </div>
+            <div class="hero-proof-line">
+              <span class="hero-proof-label">Workspace control</span>
+              <span class="hero-proof-detail">Run campaigns, inboxes, templates, and analytics in one place.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-problem" id="product" data-section="product">
+        <div class="section-heading reveal" data-reveal>
+          <p class="eyebrow">Product</p>
+          <h2>Outbound gets messy when the workflow is split across tabs, inboxes, and handoffs.</h2>
+          <p>
+            OutboundFlow replaces the spreadsheet shuffle, disconnected Gmail threads, and
+            fragmented launch process with one operating surface built for actual outbound work.
+          </p>
+        </div>
+
+        <div class="fracture-list">
+          <article class="fracture-row reveal" data-reveal>
+            <span class="fracture-index">01</span>
+            <div class="fracture-copy">
+              <h3>Contacts stop living in the same CSV forever.</h3>
+              <p>
+                Bring in lists manually, by CSV/XLSX, or through a public Sheet import and keep the
+                audience visible while the sequence is still being built.
+              </p>
+            </div>
+          </article>
+
+          <article class="fracture-row reveal" data-reveal>
+            <span class="fracture-index">02</span>
+            <div class="fracture-copy">
+              <h3>Sends stop depending on whatever inbox an operator happens to open.</h3>
+              <p>
+                Choose the mailbox, apply the message, launch immediately, and keep mailbox activity
+                tied to the campaign record instead of scattered through personal tabs.
+              </p>
+            </div>
+          </article>
+
+          <article class="fracture-row reveal" data-reveal>
+            <span class="fracture-index">03</span>
+            <div class="fracture-copy">
+              <h3>Replies stop getting buried after the first answer lands.</h3>
+              <p>
+                Reply-aware campaign logic, shared inbox visibility, and live thread sync keep the
+                whole team aligned on what changed and what needs attention next.
+              </p>
+            </div>
+          </article>
+        </div>
+
+        <div class="proof-ribbon reveal" data-reveal>
+          <div>
+            <strong>7 tabs -&gt; 1 workspace</strong>
+            <span>Replace spreadsheet juggling, inbox digging, and disconnected analytics.</span>
+          </div>
+          <div>
+            <strong>Faster reply handling</strong>
+            <span>See hot responses in the product instead of discovering them hours later.</span>
+          </div>
+          <div>
+            <strong>Cleaner launch flow</strong>
+            <span>Contacts, templates, send controls, and reply state live in the same product.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-features" data-section="features">
+        <article class="feature-band reveal" data-reveal>
+          <div class="feature-copy">
+            <p class="eyebrow">Campaign orchestration</p>
+            <h2>Build sequences that stay readable and easy to launch.</h2>
+            <p>
+              Create outreach with clear step logic, live contact visibility, and launch controls
+              made for operators who need campaigns live now.
+            </p>
+            <ul class="bullet-list">
+              <li>Manual contact add, CSV/XLSX import, and public Sheet imports</li>
+              <li>Text or HTML templates with merge fields and reusable copy</li>
+              <li>Send-now controls inside the same workspace where campaigns are reviewed</li>
+            </ul>
+          </div>
+
+          <div class="feature-visual feature-visual-sequence" aria-hidden="true">
+            <div class="sequence-shell">
+              <div class="sequence-column">
+                <span class="sequence-kicker">Audience</span>
+                <span class="sequence-bar sequence-bar-wide"></span>
+                <span class="sequence-bar"></span>
+                <span class="sequence-bar sequence-bar-short"></span>
+              </div>
+              <div class="sequence-column">
+                <span class="sequence-kicker">Step one</span>
+                <span class="sequence-card"></span>
+                <span class="sequence-card sequence-card-muted"></span>
+              </div>
+              <div class="sequence-column">
+                <span class="sequence-kicker">Follow-up</span>
+                <span class="sequence-bar"></span>
+                <span class="sequence-card sequence-card-accent"></span>
+                <span class="sequence-bar sequence-bar-short"></span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="feature-band feature-band-reversed reveal" data-reveal>
+          <div class="feature-copy">
+            <p class="eyebrow">Reply capture</p>
+            <h2>Turn campaign replies into a real operating inbox.</h2>
+            <p>
+              Threads, sends, and replies stay tied to the contact record so the team can review,
+              respond, and keep campaign health current without chasing context.
+            </p>
+            <ul class="bullet-list">
+              <li>Shared inbox visibility for founders, SDRs, and GTM leads</li>
+              <li>Reply-aware sending logic that stops sequences when prospects answer</li>
+              <li>Live sync between mailbox activity, dashboards, and campaign records</li>
+            </ul>
+          </div>
+
+          <figure class="feature-visual feature-visual-shot">
+            <img
+              src="assets/outboundflow-dashboard.png"
+              alt="OutboundFlow dashboard showing campaign analytics and outbound activity"
+              width="1280"
+              height="720"
+            >
+          </figure>
+        </article>
+
+        <article class="feature-band reveal" data-reveal>
+          <div class="feature-copy">
+            <p class="eyebrow">Workspace clarity</p>
+            <h2>Run outbound from one secure, workspace-based system.</h2>
+            <p>
+              Contacts, mailboxes, analytics, CRM sync, and seed monitoring stay scoped correctly
+              while the team moves fast inside a lightweight stack.
+            </p>
+            <ul class="bullet-list">
+              <li>Workspace membership and role-aware data access</li>
+              <li>Centralized mailbox health, campaign state, and template visibility</li>
+              <li>CRM connections, webhook imports, and seed monitoring in the same platform</li>
+            </ul>
+          </div>
+
+          <div class="feature-visual feature-visual-network" aria-hidden="true">
+            <div class="network-core">Workspace</div>
+            <span class="network-chip network-chip-a">Mailboxes</span>
+            <span class="network-chip network-chip-b">Campaigns</span>
+            <span class="network-chip network-chip-c">Replies</span>
+            <span class="network-chip network-chip-d">Templates</span>
+            <span class="network-chip network-chip-e">CRM</span>
+            <span class="network-chip network-chip-f">Seed monitor</span>
+          </div>
+        </article>
+      </section>
+
+      <section class="section section-workflow" id="workflow" data-section="workflow">
+        <div class="section-heading reveal" data-reveal>
+          <p class="eyebrow">Workflow</p>
+          <h2>A clear path from cold list to live conversation.</h2>
+          <p>
+            OutboundFlow stays opinionated where it helps and lightweight where the operator needs
+            speed.
+          </p>
+        </div>
+
+        <div class="workflow-line" aria-hidden="true"></div>
+
+        <div class="workflow-grid">
+          <article class="workflow-step reveal" data-reveal>
+            <span class="workflow-number">01</span>
+            <h3>Import the right audience.</h3>
+            <p>
+              Pull in contacts from files or a public Google Sheet and keep the list visible before
+              you launch.
+            </p>
+          </article>
+
+          <article class="workflow-step reveal" data-reveal>
+            <span class="workflow-number">02</span>
+            <h3>Launch from a real Gmail mailbox.</h3>
+            <p>
+              Pick the sender, apply the template, and move from draft to live campaign without
+              leaving the builder.
+            </p>
+          </article>
+
+          <article class="workflow-step reveal" data-reveal>
+            <span class="workflow-number">03</span>
+            <h3>Work replies in one shared view.</h3>
+            <p>
+              When a lead answers, the reply lands back in the product so the team can review and
+              respond with context.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section section-audience" id="audience" data-section="audience">
+        <div class="audience-grid">
+          <div class="section-heading reveal" data-reveal>
+            <p class="eyebrow">Built for</p>
+            <h2>Teams that need clean execution, not more tool sprawl.</h2>
+            <p>
+              The product is shaped for the operators who need shared visibility without carrying an
+              enterprise stack on top of the actual work.
+            </p>
+          </div>
+
+          <div class="audience-list">
+            <article class="audience-item reveal" data-reveal>
+              <span class="audience-index">A</span>
+              <h3>Founders running outbound before hiring a full GTM team</h3>
+            </article>
+            <article class="audience-item reveal" data-reveal>
+              <span class="audience-index">B</span>
+              <h3>Lean SDR teams that need shared visibility without extra tooling sprawl</h3>
+            </article>
+            <article class="audience-item reveal" data-reveal>
+              <span class="audience-index">C</span>
+              <h3>Agencies and operators managing multiple campaigns inside one workspace</h3>
+            </article>
+          </div>
+        </div>
+
+        <div class="integration-strip reveal" data-reveal>
+          <div class="integration-track">
+            <span>Gmail</span>
+            <span>HubSpot</span>
+            <span>Salesforce</span>
+            <span>Pipedrive</span>
+            <span>Zoho</span>
+            <span>Slack</span>
+            <span>Calendly</span>
+            <span>Google Sheets</span>
+            <span>CSV/XLSX</span>
+            <span>Supabase</span>
+            <span>Seed monitoring</span>
+            <span>Open + click tracking</span>
+            <span class="integration-icon">
+              <img src="assets/microsoft-office-outlook-logo.svg" alt="" width="20" height="20">
+              Outlook
+            </span>
+            <span>Custom CRM webhooks</span>
+            <span>Usage controls</span>
+            <span>Background jobs</span>
+          </div>
+          <div class="integration-track integration-track-duplicate" aria-hidden="true">
+            <span>Gmail</span>
+            <span>HubSpot</span>
+            <span>Salesforce</span>
+            <span>Pipedrive</span>
+            <span>Zoho</span>
+            <span>Slack</span>
+            <span>Calendly</span>
+            <span>Google Sheets</span>
+            <span>CSV/XLSX</span>
+            <span>Supabase</span>
+            <span>Seed monitoring</span>
+            <span>Open + click tracking</span>
+            <span class="integration-icon">
+              <img src="assets/microsoft-office-outlook-logo.svg" alt="" width="20" height="20">
+              Outlook
+            </span>
+            <span>Custom CRM webhooks</span>
+            <span>Usage controls</span>
+            <span>Background jobs</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-proof" id="proof" data-section="proof">
+        <div class="proof-layout">
+          <figure class="proof-shot reveal" data-reveal>
+            <img
+              src="assets/outboundflow-dashboard.png"
+              alt="OutboundFlow dashboard screenshot with lead metrics and campaign performance"
+              width="1280"
+              height="720"
+            >
+          </figure>
+
+          <div class="proof-content">
+            <div class="section-heading reveal" data-reveal>
+              <p class="eyebrow">Proof</p>
+              <h2>Product proof instead of pitch-deck promises.</h2>
+              <p>
+                OutboundFlow is built around the real operating loop: import, launch, monitor,
+                reply, sync, and keep delivery visibility close to the work.
+              </p>
+            </div>
+
+            <div class="proof-points">
+              <article class="proof-point reveal" data-reveal>
+                <strong>7 tabs -&gt; 1 workspace</strong>
+                <p>
+                  Replace spreadsheet juggling, personal Gmail digging, and disconnected analytics
+                  with one operational surface.
+                </p>
+              </article>
+              <article class="proof-point reveal" data-reveal>
+                <strong>Faster reply handling</strong>
+                <p>
+                  The moment a lead answers, your team can see it in the inbox instead of discovering
+                  it later in a mailbox.
+                </p>
+              </article>
+              <article class="proof-point reveal" data-reveal>
+                <strong>Cleaner launch flow</strong>
+                <p>
+                  Contacts, copy, mailbox setup, and campaign sends are handled in the same product,
+                  so campaigns do not stall mid-build.
+                </p>
+              </article>
+            </div>
+
+            <ul class="stack-list reveal" data-reveal>
+              <li>Workspace-first architecture with shared workspace auto-join</li>
+              <li>Gmail sending, reply sync, and mailbox connection management</li>
+              <li>HTML template gallery, tracked outbound events, and open/click handling</li>
+              <li>HubSpot and Salesforce foundations plus custom CRM import support</li>
+              <li>Owned seed inbox monitoring with queued probes and placement reporting</li>
+              <li>Supabase cron-ready functions for ongoing outbound operations</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-cta" id="cta" data-section="cta">
+        <div class="cta-shell reveal" data-reveal>
+          <p class="eyebrow">Ready to move faster</p>
+          <h2>Replace scattered outbound work with one focused workspace.</h2>
+          <p>
+            Connect Gmail, load contacts, save the sequence, and keep replies visible from day one.
+          </p>
+          <div class="cta-actions">
+            <a class="button button-primary" href="/sign-up">Create workspace</a>
+            <a class="button button-ghost" href="/sign-in">Sign in</a>
+          </div>
+          <div class="cta-notes">
+            <span>Gmail-native outbound</span>
+            <span>Lean team workflow</span>
+            <span>Shared reply visibility</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brandmark brandmark-footer" href="#top">
+        <span class="brandmark-logo">
+          <img src="assets/rocket-logo.webp" alt="" width="40" height="40">
+        </span>
+        <span class="brandmark-copy">
+          <span class="brandmark-name">OutboundFlow</span>
+          <span class="brandmark-tag">Gmail-native outbound for lean teams.</span>
+        </span>
+      </a>
+
+      <div class="footer-links">
+        <a href="#product">Product</a>
+        <a href="#proof">Proof</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#audience">Audience</a>
+      </div>
+
+      <p class="footer-copy">Standalone preview built from local OutboundFlow assets and product content.</p>
+    </footer>
+  </body>
+</html>

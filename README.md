@@ -216,6 +216,8 @@ Apply the database migrations in order:
 - [20260320190000_production_completion.sql](/Users/admin/Desktop/AI/outboundflow/outboundflow-new/emailautomation/emailautomation/supabase/migrations/20260320190000_production_completion.sql)
 
 Additional setup notes: [docs/supabase-setup.md](/Users/admin/Desktop/AI/outboundflow/outboundflow-new/emailautomation/emailautomation/docs/supabase-setup.md)
+Reusable Codex build prompt: [docs/codex-master-build-prompt.md](/Users/admin/Desktop/AI/outboundflow/outboundflow-new/emailautomation/emailautomation/emailautomation/docs/codex-master-build-prompt.md)
+Docs index: [docs/README.md](/Users/admin/Desktop/AI/outboundflow/outboundflow-new/emailautomation/emailautomation/emailautomation/docs/README.md)
 
 ## Edge Functions and Cron
 

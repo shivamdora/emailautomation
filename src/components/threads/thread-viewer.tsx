@@ -134,7 +134,7 @@ export function ThreadViewer({
   const renderedMessage = selectedThread?.renderedMessage ?? null;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+    <div className="grid gap-4 lg:grid-cols-[minmax(25rem,30rem)_minmax(0,1fr)]">
       <Card className="card-shadow overflow-hidden">
         <CardHeader>
           <CardTitle>{viewerCopy.listTitle}</CardTitle>
@@ -156,50 +156,53 @@ export function ThreadViewer({
                           : "",
                       )}
                     >
-                      <p className="truncate text-sm font-semibold text-foreground">
+                      <p className="text-pretty text-sm font-semibold leading-5 text-foreground">
                         {thread.subject ?? viewerCopy.untitledThreadLabel}
                       </p>
-                      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                        <span className="truncate">{thread.senderEmail ?? "Unknown sender"}</span>
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span className="min-w-0 break-words">{thread.senderEmail ?? "Unknown sender"}</span>
                         <span className="shrink-0">{formatThreadDate(thread.receivedAt)}</span>
                       </div>
                     </button>
                   ))}
                 </div>
               </div>
-              {hasMore ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={isLoadingMore}
-                  onClick={() => {
-                    setIsLoadingMore(true);
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={isLoadingMore || !hasMore}
+                onClick={() => {
+                  if (!hasMore) {
+                    return;
+                  }
 
-                    fetch(`/api/inbox/threads?limit=10&offset=${threads.length}`)
-                      .then(async (response) => {
-                        const payload = await response.json().catch(() => null);
+                  setIsLoadingMore(true);
 
-                        if (!response.ok) {
-                          throw new Error(payload?.error ?? "Failed to load more threads.");
-                        }
+                  fetch(`/api/inbox/threads?limit=10&offset=${threads.length}`)
+                    .then(async (response) => {
+                      const payload = await response.json().catch(() => null);
 
-                        return payload as { threads: InboxThreadSummary[]; hasMore: boolean };
-                      })
-                      .then((payload) => {
-                        setThreads((current) => [...current, ...payload.threads]);
-                        setHasMore(payload.hasMore);
-                      })
-                      .catch((error) => {
-                        toast.error(error instanceof Error ? error.message : "Failed to load more threads.");
-                      })
-                      .finally(() => {
-                        setIsLoadingMore(false);
-                      });
-                  }}
-                >
-                  {isLoadingMore ? "Loading..." : "Load more"}
-                </Button>
-              ) : null}
+                      if (!response.ok) {
+                        throw new Error(payload?.error ?? "Failed to load more threads.");
+                      }
+
+                      return payload as { threads: InboxThreadSummary[]; hasMore: boolean };
+                    })
+                    .then((payload) => {
+                      setThreads((current) => [...current, ...payload.threads]);
+                      setHasMore(payload.hasMore);
+                    })
+                    .catch((error) => {
+                      toast.error(error instanceof Error ? error.message : "Failed to load more threads.");
+                    })
+                    .finally(() => {
+                      setIsLoadingMore(false);
+                    });
+                }}
+              >
+                {isLoadingMore ? "Loading..." : "Load more"}
+              </Button>
             </>
           ) : (
             <div className="glass-control rounded-[1.5rem] px-4 py-5">
